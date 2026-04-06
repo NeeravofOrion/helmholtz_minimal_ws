@@ -1,4 +1,0 @@
-source;share/helmholtz_interfaces/local_setup.bash
-source;share/helmholtz_interfaces/local_setup.dsv
-source;share/helmholtz_interfaces/local_setup.sh
-source;share/helmholtz_interfaces/local_setup.zsh

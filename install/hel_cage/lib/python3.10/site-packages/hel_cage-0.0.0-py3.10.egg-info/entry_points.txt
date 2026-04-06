@@ -1,7 +1,0 @@
-[console_scripts]
-bridge_node = hel_cage.bridge_node:main
-cmd_publisher = hel_cage.cmd_publisher:main
-control_node = hel_cage.control_node:main
-fft_node = hel_cage.fft_node:main
-gui_node = hel_cage.gui_node:main
-
