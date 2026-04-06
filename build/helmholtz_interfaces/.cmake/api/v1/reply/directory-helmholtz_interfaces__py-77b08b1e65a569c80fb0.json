@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "helmholtz_interfaces__py",
+		"source" : "/home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces/helmholtz_interfaces__py"
+	}
+}

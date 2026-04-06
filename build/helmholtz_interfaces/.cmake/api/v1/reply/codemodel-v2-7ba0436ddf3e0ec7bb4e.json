@@ -1,0 +1,233 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-a2571a8742cf700d753a.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17
+					]
+				},
+				{
+					"build" : "helmholtz_interfaces__py",
+					"jsonFile" : "directory-helmholtz_interfaces__py-77b08b1e65a569c80fb0.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "/home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces/helmholtz_interfaces__py",
+					"targetIndexes" : 
+					[
+						4
+					]
+				}
+			],
+			"name" : "",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1
+					],
+					"name" : "helmholtz_interfaces",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_build_helmholtz_interfaces_egg::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_build_helmholtz_interfaces_egg-a26af4a98e0b79913acc.json",
+					"name" : "ament_cmake_python_build_helmholtz_interfaces_egg",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_copy_helmholtz_interfaces::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_copy_helmholtz_interfaces-fd5e656b183da537aa2b.json",
+					"name" : "ament_cmake_python_copy_helmholtz_interfaces",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces-6841606b77620cca9045.json",
+					"name" : "helmholtz_interfaces",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__cpp-3b33d12c71ba3a361b33.json",
+					"name" : "helmholtz_interfaces__cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "helmholtz_interfaces__py::@079f99c74023628f567c",
+					"jsonFile" : "target-helmholtz_interfaces__py-7ca56a7b9a4134574ff1.json",
+					"name" : "helmholtz_interfaces__py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_generator_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_generator_c-d17856fe8ab021a72a0b.json",
+					"name" : "helmholtz_interfaces__rosidl_generator_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_generator_py::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_generator_py-56a923ef4305a041e2f6.json",
+					"name" : "helmholtz_interfaces__rosidl_generator_py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_typesupport_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_typesupport_c-d5f43d5a3793ef2e7ac5.json",
+					"name" : "helmholtz_interfaces__rosidl_typesupport_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_typesupport_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_typesupport_c__pyext-051d10fd4247adf28cac.json",
+					"name" : "helmholtz_interfaces__rosidl_typesupport_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_typesupport_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_typesupport_cpp-c5769501c464ba1a2f61.json",
+					"name" : "helmholtz_interfaces__rosidl_typesupport_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_typesupport_fastrtps_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_typesupport_fastrtps_c-9334f6ddf83aa33eb390.json",
+					"name" : "helmholtz_interfaces__rosidl_typesupport_fastrtps_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_typesupport_fastrtps_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_typesupport_fastrtps_c__pyext-27afb457795c95a6252f.json",
+					"name" : "helmholtz_interfaces__rosidl_typesupport_fastrtps_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_typesupport_fastrtps_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_typesupport_fastrtps_cpp-9010ea7169c90bc071ea.json",
+					"name" : "helmholtz_interfaces__rosidl_typesupport_fastrtps_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_typesupport_introspection_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_typesupport_introspection_c-9929c827856a99bfb211.json",
+					"name" : "helmholtz_interfaces__rosidl_typesupport_introspection_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_typesupport_introspection_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_typesupport_introspection_c__pyext-066179b60f2789e8e236.json",
+					"name" : "helmholtz_interfaces__rosidl_typesupport_introspection_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces__rosidl_typesupport_introspection_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces__rosidl_typesupport_introspection_cpp-11d30ef946d7467e5c65.json",
+					"name" : "helmholtz_interfaces__rosidl_typesupport_introspection_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "helmholtz_interfaces_uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-helmholtz_interfaces_uninstall-e0c8f3acd100258214ee.json",
+					"name" : "helmholtz_interfaces_uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uninstall-0c306b8c3df0e95cd415.json",
+					"name" : "uninstall",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces",
+		"source" : "/home/neerav/helmholtz_minimal_ws/src/helmholtz_interfaces"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}

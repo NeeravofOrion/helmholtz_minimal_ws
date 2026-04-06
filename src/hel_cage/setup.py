@@ -33,6 +33,9 @@ setup(
             'bridge_node = hel_cage.bridge_node:main',
             'cmd_publisher = hel_cage.cmd_publisher:main',
             'fft_node = hel_cage.fft_node:main',
+            'control_node = hel_cage.control_node:main',
+            
+
         ],
     },
 )

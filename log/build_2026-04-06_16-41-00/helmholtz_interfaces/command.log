@@ -1,0 +1,4 @@
+Invoking command in '/home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces -- -j12 -l12
+Invoked command in '/home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces -- -j12 -l12
+Invoking command in '/home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces
+Invoked command in '/home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/neerav/helmholtz_minimal_ws/build/helmholtz_interfaces

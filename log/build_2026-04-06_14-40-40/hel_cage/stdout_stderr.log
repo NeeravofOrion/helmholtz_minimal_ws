@@ -1,0 +1,52 @@
+running egg_info
+creating ../../build/hel_cage/hel_cage.egg-info
+writing ../../build/hel_cage/hel_cage.egg-info/PKG-INFO
+writing dependency_links to ../../build/hel_cage/hel_cage.egg-info/dependency_links.txt
+writing entry points to ../../build/hel_cage/hel_cage.egg-info/entry_points.txt
+writing requirements to ../../build/hel_cage/hel_cage.egg-info/requires.txt
+writing top-level names to ../../build/hel_cage/hel_cage.egg-info/top_level.txt
+writing manifest file '../../build/hel_cage/hel_cage.egg-info/SOURCES.txt'
+reading manifest file '../../build/hel_cage/hel_cage.egg-info/SOURCES.txt'
+writing manifest file '../../build/hel_cage/hel_cage.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /home/neerav/helmholtz_minimal_ws/build/hel_cage/build
+creating /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib
+creating /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage
+copying hel_cage/control_node.py -> /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage
+copying hel_cage/fft_node.py -> /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage
+copying hel_cage/bridge_node.py -> /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage
+copying hel_cage/cmd_publisher.py -> /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage
+copying hel_cage/gui_node.py -> /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage
+copying hel_cage/__init__.py -> /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage
+running install
+running install_lib
+creating /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage
+copying /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage/control_node.py -> /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage
+copying /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage/fft_node.py -> /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage
+copying /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage/bridge_node.py -> /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage
+copying /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage/cmd_publisher.py -> /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage
+copying /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage/gui_node.py -> /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage
+copying /home/neerav/helmholtz_minimal_ws/build/hel_cage/build/lib/hel_cage/__init__.py -> /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage
+byte-compiling /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage/control_node.py to control_node.cpython-310.pyc
+byte-compiling /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage/fft_node.py to fft_node.cpython-310.pyc
+byte-compiling /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage/bridge_node.py to bridge_node.cpython-310.pyc
+byte-compiling /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage/cmd_publisher.py to cmd_publisher.cpython-310.pyc
+byte-compiling /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage/gui_node.py to gui_node.cpython-310.pyc
+byte-compiling /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage/__init__.py to __init__.cpython-310.pyc
+running install_data
+creating /home/neerav/helmholtz_minimal_ws/install/hel_cage/share/ament_index
+creating /home/neerav/helmholtz_minimal_ws/install/hel_cage/share/ament_index/resource_index
+creating /home/neerav/helmholtz_minimal_ws/install/hel_cage/share/ament_index/resource_index/packages
+copying resource/hel_cage -> /home/neerav/helmholtz_minimal_ws/install/hel_cage/share/ament_index/resource_index/packages
+copying package.xml -> /home/neerav/helmholtz_minimal_ws/install/hel_cage/share/hel_cage
+creating /home/neerav/helmholtz_minimal_ws/install/hel_cage/share/hel_cage/launch
+copying launch/system.launch.py -> /home/neerav/helmholtz_minimal_ws/install/hel_cage/share/hel_cage/launch
+running install_egg_info
+Copying ../../build/hel_cage/hel_cage.egg-info to /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/python3.10/site-packages/hel_cage-0.0.0-py3.10.egg-info
+running install_scripts
+Installing bridge_node script to /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/hel_cage
+Installing cmd_publisher script to /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/hel_cage
+Installing fft_node script to /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/hel_cage
+Installing gui_node script to /home/neerav/helmholtz_minimal_ws/install/hel_cage/lib/hel_cage
+writing list of installed files to '/home/neerav/helmholtz_minimal_ws/build/hel_cage/install.log'

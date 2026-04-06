@@ -1,0 +1,7 @@
+{
+  "package_name": "helmholtz_interfaces",
+  "non_idl_tuples": [
+    "/home/neerav/helmholtz_minimal_ws/src/helmholtz_interfaces:msg/Command.msg",
+    "/home/neerav/helmholtz_minimal_ws/src/helmholtz_interfaces:srv/SetPID.srv"
+  ]
+}

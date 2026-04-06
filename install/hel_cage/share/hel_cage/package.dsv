@@ -1,0 +1,6 @@
+source;share/hel_cage/hook/pythonpath.ps1
+source;share/hel_cage/hook/pythonpath.dsv
+source;share/hel_cage/hook/pythonpath.sh
+source;share/hel_cage/hook/ament_prefix_path.ps1
+source;share/hel_cage/hook/ament_prefix_path.dsv
+source;share/hel_cage/hook/ament_prefix_path.sh
