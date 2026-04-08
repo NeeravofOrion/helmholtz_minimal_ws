@@ -26,4 +26,25 @@ def generate_launch_description():
             output='screen'
         ),
 
+        # ===== NEW: CALIBRATION NODE =====
+        Node(
+            package='hel_cage',
+            executable='calibration_node',
+            name='calibration_node',
+            output='screen'
+        ),
+
+        # ===== NEW: DATA LOGGER =====
+        Node(
+            package='hel_cage',
+            executable='data_logger_node',
+            name='data_logger',
+            output='screen'
+        ),
+        Node(
+            package='hel_cage',
+            executable='variable_field_node',
+            name='variable_field_node',
+         output='screen'
+        ),
     ])

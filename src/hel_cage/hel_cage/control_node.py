@@ -2,6 +2,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Vector3
 from std_msgs.msg import String
+import numpy as np
 
 
 class ControlNode(Node):
@@ -14,6 +15,9 @@ class ControlNode(Node):
         self.create_subscription(String, 'control_cmd', self.ctrl_cb, 10)
         self.create_subscription(Vector3, 'pid_gain', self.pid_cb, 10)
 
+        # NEW: calibration input
+        self.create_subscription(Vector3, 'pwm_base', self.base_cb, 10)
+
         # ===== PUB =====
         self.pwm_pub = self.create_publisher(Vector3, 'pwm_cmd', 10)
 
@@ -22,31 +26,25 @@ class ControlNode(Node):
         self.current = Vector3()
         self.control_enabled = False
 
+        # ===== CALIBRATION BASE =====
+        self.pwm_base = np.array([0.0, 0.0, 0.0])
+
         # ===== PID GAINS =====
-        self.kp = 0.5
+        self.kp = 0.2   # REDUCED
         self.ki = 0.0
         self.kd = 0.0
 
         # ===== PID STATE =====
-        self.int_x = 0.0
-        self.int_y = 0.0
-        self.int_z = 0.0
+        self.int_x = self.int_y = self.int_z = 0.0
+        self.prev_x = self.prev_y = self.prev_z = 0.0
 
-        self.prev_x = 0.0
-        self.prev_y = 0.0
-        self.prev_z = 0.0
-
-        # ===== DERIVATIVE FILTER =====
-        self.d_x = 0.0
-        self.d_y = 0.0
-        self.d_z = 0.0
+        self.d_x = self.d_y = self.d_z = 0.0
 
         # ===== TIMING =====
         self.last_time = self.get_clock().now()
         self.last_log = self.get_clock().now()
 
-        # ===== CONTROL LOOP (FIXED RATE) =====
-        self.create_timer(0.02, self.control_loop)  # 50 Hz
+        self.create_timer(0.02, self.control_loop)
 
     # ===== TELEMETRY =====
     def tel_cb(self, msg: Vector3):
@@ -66,10 +64,13 @@ class ControlNode(Node):
         self.ki = msg.y
         self.kd = msg.z
 
+    # ===== CALIBRATION INPUT =====
+    def base_cb(self, msg: Vector3):
+        self.pwm_base = np.array([msg.x, msg.y, msg.z])
+
     # ===== CONTROL COMMAND =====
     def ctrl_cb(self, msg: String):
         cmd = msg.data.strip().upper()
-        self.get_logger().info(f'CONTROL CMD: {cmd}')
 
         if cmd == "START":
             self.control_enabled = True
@@ -79,12 +80,9 @@ class ControlNode(Node):
             self.control_enabled = False
 
             zero = Vector3()
-            zero.x = 0.0
-            zero.y = 0.0
-            zero.z = 0.0
             self.pwm_pub.publish(zero)
 
-    # ===== MAIN CONTROL LOOP =====
+    # ===== MAIN LOOP =====
     def control_loop(self):
         if not self.control_enabled:
             return
@@ -96,7 +94,7 @@ class ControlNode(Node):
         if dt <= 0:
             return
 
-        dt = min(dt, 0.02)  # clamp
+        dt = min(dt, 0.02)
 
         # ===== ERROR =====
         ex = self.target.x - self.current.x
@@ -132,10 +130,15 @@ class ControlNode(Node):
         self.prev_y = ey
         self.prev_z = ez
 
-        # ===== PID =====
-        ux = self.kp * ex + self.ki * self.int_x + self.kd * self.d_x
-        uy = self.kp * ey + self.ki * self.int_y + self.kd * self.d_y
-        uz = self.kp * ez + self.ki * self.int_z + self.kd * self.d_z
+        # ===== PID (CORRECTION) =====
+        cx = self.kp * ex + self.ki * self.int_x + self.kd * self.d_x
+        cy = self.kp * ey + self.ki * self.int_y + self.kd * self.d_y
+        cz = self.kp * ez + self.ki * self.int_z + self.kd * self.d_z
+
+        # ===== ADD CALIBRATION =====
+        ux = self.pwm_base[0] + cx
+        uy = self.pwm_base[1] + cy
+        uz = self.pwm_base[2] + cz
 
         # ===== CLAMP =====
         ux = max(min(ux, 255), -255)
@@ -150,10 +153,10 @@ class ControlNode(Node):
 
         self.pwm_pub.publish(out)
 
-        # ===== LOG =====
+        # ===== DEBUG =====
         if (now - self.last_log).nanoseconds > 200_000_000:
             self.get_logger().info(
-                f'ERR: {ex:.2f},{ey:.2f},{ez:.2f} | '
+                f'BASE: {self.pwm_base} | ERR: {ex:.2f},{ey:.2f},{ez:.2f} | '
                 f'PWM: {ux:.2f},{uy:.2f},{uz:.2f}'
             )
             self.last_log = now

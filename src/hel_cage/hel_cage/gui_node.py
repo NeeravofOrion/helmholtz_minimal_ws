@@ -19,15 +19,15 @@ class GuiNode(Node):
     def __init__(self):
         super().__init__('gui_node')
 
-        # ===== PUB =====
         self.cmd_pub = self.create_publisher(Vector3, 'cmd_B', 10)
         self.ctrl_pub = self.create_publisher(String, 'control_cmd', 10)
         self.pid_pub = self.create_publisher(Vector3, 'pid_gain', 10)
 
-        # ===== SUB =====
         self.sub = self.create_subscription(Vector3, 'telemetry', self.telemetry_cb, 10)
+        self.state_sub = self.create_subscription(String, 'control_state', self.state_cb, 10)
 
-        # ===== DATA =====
+        self.current_mode = "UNKNOWN"
+
         self.data_x = deque(maxlen=BUFFER_SIZE)
         self.data_y = deque(maxlen=BUFFER_SIZE)
         self.data_z = deque(maxlen=BUFFER_SIZE)
@@ -37,10 +37,10 @@ class GuiNode(Node):
         self.data_y.append(msg.y)
         self.data_z.append(msg.z)
 
-        if hasattr(self, 'gui') and self.gui.ambient_active:
-            self.gui.ambient_x.append(msg.x)
-            self.gui.ambient_y.append(msg.y)
-            self.gui.ambient_z.append(msg.z)
+    def state_cb(self, msg):
+        self.current_mode = msg.data
+        if hasattr(self, 'gui'):
+            self.gui.update_mode_display(msg.data)
 
     def publish_cmd(self, x, y, z):
         msg = Vector3()
@@ -49,7 +49,7 @@ class GuiNode(Node):
         msg.z = float(z)
         self.cmd_pub.publish(msg)
 
-    def send_control(self, cmd: str):
+    def send_control(self, cmd):
         msg = String()
         msg.data = cmd
         self.ctrl_pub.publish(msg)
@@ -64,34 +64,50 @@ class GuiNode(Node):
 
 # ================= GUI =================
 class PlotWindow(QtWidgets.QMainWindow):
-    def __init__(self, ros_node):
+    def __init__(self, node):
         super().__init__()
+        self.node = node
 
-        self.node = ros_node
-        self.setWindowTitle("Helmholtz Cage GUI (PC Control)")
+        self.setWindowTitle("Helmholtz Cage GUI")
 
         central = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout()
 
-        self.target_x = 0
-        self.target_y = 0
-        self.target_z = 0
+        # ===== MODE DISPLAY =====
+        self.mode_label = QtWidgets.QLabel("Mode: UNKNOWN")
+        layout.addWidget(self.mode_label)
 
-        # -------- CMD INPUT --------
+        # ===== MODE CONTROL =====
+        mode_layout = QtWidgets.QHBoxLayout()
+
+        self.mode_selector = QtWidgets.QComboBox()
+        self.mode_selector.addItems(["Constant Field", "Variable Field"])
+
+        self.csv_path = QtWidgets.QLineEdit()
+        self.csv_path.setPlaceholderText("CSV file")
+
+        self.var_start_btn = QtWidgets.QPushButton("Start Variable Field")
+        self.var_start_btn.clicked.connect(self.start_variable_field)
+
+        mode_layout.addWidget(self.mode_selector)
+        mode_layout.addWidget(self.csv_path)
+        mode_layout.addWidget(self.var_start_btn)
+
+        # ===== CMD INPUT =====
         input_layout = QtWidgets.QHBoxLayout()
 
         self.bx = QtWidgets.QLineEdit()
         self.by = QtWidgets.QLineEdit()
         self.bz = QtWidgets.QLineEdit()
 
-        self.bx.setPlaceholderText("Bx (µT)")
-        self.by.setPlaceholderText("By (µT)")
-        self.bz.setPlaceholderText("Bz (µT)")
+        self.bx.setPlaceholderText("Bx")
+        self.by.setPlaceholderText("By")
+        self.bz.setPlaceholderText("Bz")
 
         send_btn = QtWidgets.QPushButton("Send CMD")
         send_btn.clicked.connect(self.send_cmd)
 
-        zero_btn = QtWidgets.QPushButton("Zero Field")
+        zero_btn = QtWidgets.QPushButton("Zero")
         zero_btn.clicked.connect(self.zero_field)
 
         start_btn = QtWidgets.QPushButton("START")
@@ -108,7 +124,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         input_layout.addWidget(start_btn)
         input_layout.addWidget(stop_btn)
 
-        # -------- PID --------
+        # ===== PID CONTROL (RESTORED) =====
         pid_layout = QtWidgets.QHBoxLayout()
 
         self.kp = QtWidgets.QLineEdit()
@@ -127,84 +143,80 @@ class PlotWindow(QtWidgets.QMainWindow):
         pid_layout.addWidget(self.kd)
         pid_layout.addWidget(pid_btn)
 
-        # -------- AMBIENT --------
-        self.ambient_btn = QtWidgets.QPushButton("Measure Ambient (5s)")
-        self.ambient_btn.clicked.connect(self.start_ambient)
-
-        self.ambient_label = QtWidgets.QLabel("Ambient: ---")
-
-        # -------- PLOTS --------
+        # ===== PLOTS =====
         self.plot_widget = pg.GraphicsLayoutWidget()
 
-        self.plot_x = self.plot_widget.addPlot(title="Bx (µT)")
+        self.plot_x = self.plot_widget.addPlot(title="Bx")
         self.plot_widget.nextRow()
-        self.plot_y = self.plot_widget.addPlot(title="By (µT)")
+        self.plot_y = self.plot_widget.addPlot(title="By")
         self.plot_widget.nextRow()
-        self.plot_z = self.plot_widget.addPlot(title="Bz (µT)")
+        self.plot_z = self.plot_widget.addPlot(title="Bz")
 
         self.curve_x = self.plot_x.plot(pen='r')
         self.curve_y = self.plot_y.plot(pen='g')
         self.curve_z = self.plot_z.plot(pen='b')
 
-        self.target_curve_x = self.plot_x.plot(pen=pg.mkPen('r', style=QtCore.Qt.DashLine))
-        self.target_curve_y = self.plot_y.plot(pen=pg.mkPen('g', style=QtCore.Qt.DashLine))
-        self.target_curve_z = self.plot_z.plot(pen=pg.mkPen('b', style=QtCore.Qt.DashLine))
-
+        layout.addLayout(mode_layout)
         layout.addLayout(input_layout)
         layout.addLayout(pid_layout)
-        layout.addWidget(self.ambient_btn)
-        layout.addWidget(self.ambient_label)
         layout.addWidget(self.plot_widget)
 
         central.setLayout(layout)
         self.setCentralWidget(central)
 
-        # -------- AMBIENT STATE --------
-        self.ambient_active = False
-        self.ambient_x = []
-        self.ambient_y = []
-        self.ambient_z = []
-
-        self.ambient_timer = QtCore.QTimer()
-        self.ambient_timer.setSingleShot(True)
-        self.ambient_timer.timeout.connect(self.finish_ambient)
-
-        # -------- TIMER --------
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update_plot)
         self.timer.start(30)
 
-    # -------- COMMAND --------
+    # ===== MODE DISPLAY =====
+    def update_mode_display(self, mode):
+        self.mode_label.setText(f"Mode: {mode}")
+
+    # ===== COMMAND =====
     def send_cmd(self):
+        if self.mode_selector.currentText() != "Constant Field":
+            print("Blocked: Variable mode active")
+            return
+
         try:
             x = float(self.bx.text())
             y = float(self.by.text())
             z = float(self.bz.text())
 
-            self.target_x = x
-            self.target_y = y
-            self.target_z = z
-
             self.node.publish_cmd(x, y, z)
         except:
-            print("Invalid CMD input")
+            print("Invalid input")
 
     def zero_field(self):
-        self.target_x = 0
-        self.target_y = 0
-        self.target_z = 0
-        self.node.publish_cmd(0.0, 0.0, 0.0)
+        if self.mode_selector.currentText() != "Constant Field":
+            return
+        self.node.publish_cmd(0, 0, 0)
 
     def start_system(self):
+        if self.mode_selector.currentText() == "Variable Field":
+            return
         self.node.send_control("START")
+        
 
     def stop_system(self):
         self.node.send_control("STOP")
-        self.target_x = 0
-        self.target_y = 0
-        self.target_z = 0
 
-    # -------- PID --------
+    def start_variable_field(self):
+     if self.mode_selector.currentText() != "Variable Field":
+        return
+
+     path = self.csv_path.text().strip()
+     if path == "":
+        print("CSV required")
+        return
+
+     # 1. Start variable field FIRST (defines cmd_B)
+     self.node.send_control(f"VAR_START:{path}")
+
+     # 2. THEN enable control loop
+     self.node.send_control("START")
+
+    # ===== PID =====
     def set_pid(self):
         try:
             kp = float(self.kp.text())
@@ -212,49 +224,13 @@ class PlotWindow(QtWidgets.QMainWindow):
             kd = float(self.kd.text())
             self.node.publish_pid(kp, ki, kd)
         except:
-            print("Invalid PID input")
+            print("Invalid PID")
 
-    # -------- AMBIENT --------
-    def start_ambient(self):
-        self.ambient_x.clear()
-        self.ambient_y.clear()
-        self.ambient_z.clear()
-
-        self.ambient_active = True
-        self.ambient_timer.start(5000)
-        self.ambient_label.setText("Measuring...")
-
-    def finish_ambient(self):
-        self.ambient_active = False
-
-        if len(self.ambient_x) == 0:
-            self.ambient_label.setText("No data")
-            return
-
-        avg_x = sum(self.ambient_x) / len(self.ambient_x)
-        avg_y = sum(self.ambient_y) / len(self.ambient_y)
-        avg_z = sum(self.ambient_z) / len(self.ambient_z)
-
-        B = math.sqrt(avg_x**2 + avg_y**2 + avg_z**2)
-
-        self.ambient_label.setText(
-            f"Ambient → Bx: {avg_x:.2f} µT | "
-            f"By: {avg_y:.2f} µT | "
-            f"Bz: {avg_z:.2f} µT | "
-            f"|B|: {B:.2f} µT"
-        )
-
-    # -------- PLOT --------
+    # ===== PLOT =====
     def update_plot(self):
         self.curve_x.setData(self.node.data_x)
         self.curve_y.setData(self.node.data_y)
         self.curve_z.setData(self.node.data_z)
-
-        n = len(self.node.data_x)
-        if n > 0:
-            self.target_curve_x.setData([self.target_x] * n)
-            self.target_curve_y.setData([self.target_y] * n)
-            self.target_curve_z.setData([self.target_z] * n)
 
 
 # ================= MAIN =================
