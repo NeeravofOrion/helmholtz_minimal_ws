@@ -1,137 +1,302 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+
 import sys
 import os
+import pandas as pd
+import numpy as np
 
-# ===== INPUT FROM TERMINAL =====
-if len(sys.argv) < 2:
-    print("Usage: python3 analyze.py <filename.csv>")
-    sys.exit(1)
+from PyQt5 import QtWidgets, QtCore, QtGui
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.figure import Figure
 
-filename = sys.argv[1]
+# ================= STATUS INDICATOR =================
+class StatusIndicator(QtWidgets.QWidget):
+    def __init__(self, label, parent=None):
+        super().__init__(parent)
+        layout = QtWidgets.QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.dot = QtWidgets.QLabel('●')
+        self.set_color('grey')
+        
+        self.text = QtWidgets.QLabel(label)
+        self.text.setStyleSheet('font-size: 14px;')
+        
+        layout.addWidget(self.dot)
+        layout.addWidget(self.text)
+        layout.addStretch()
+        self.setLayout(layout)
 
-# ===== RESOLVE PATH =====
-# assumes script and CSV are in same folder
-file = os.path.join(os.getcwd(), filename)
+    def set_color(self, color):
+        colors = {'grey': '#888888', 'green': '#2ecc71', 'red': '#e74c3c'}
+        hex_color = colors.get(color, '#888888')
+        self.dot.setStyleSheet(f'color: {hex_color}; font-size: 18px;')
 
-if not os.path.exists(file):
-    print(f"File not found: {file}")
-    sys.exit(1)
+# ================= MATPLOTLIB CANVAS =================
+class MplCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=10, height=8, dpi=100):
+        self.fig = Figure(figsize=(width, height), dpi=dpi)
+        # Create a 2x3 grid for the 5 plots
+        self.axes = [
+            self.fig.add_subplot(2, 3, 1), # Tracking
+            self.fig.add_subplot(2, 3, 2), # Error
+            self.fig.add_subplot(2, 3, 3), # PWM Output
+            self.fig.add_subplot(2, 3, 4), # PWM base vs PWM
+            self.fig.add_subplot(2, 3, 5)  # Error Magnitude
+        ]
+        self.fig.tight_layout(pad=3.0)
+        super(MplCanvas, self).__init__(self.fig)
 
-print(f"Using file: {file}")
+# ================= MAIN APPLICATION =================
+class DataAnalysisTool(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Helmholtz Cage Data Analysis Tool")
+        self.resize(1200, 800)
 
-# ===== LOAD FILE =====
-df = pd.read_csv(file, header=None)
+        # Main Layout
+        central_widget = QtWidgets.QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QtWidgets.QHBoxLayout(central_widget)
 
-# ===== ASSIGN COLUMNS =====
-df.columns = [
-    "time",
-    "Bx_t","By_t","Bz_t",
-    "Bx_m","By_m","Bz_m",
-    "PWMb_x","PWMb_y","PWMb_z",
-    "PWM_x","PWM_y","PWM_z",
-    "err_x","err_y","err_z"
-]
+        # ===== LEFT PANEL (CONTROLS) =====
+        left_panel = QtWidgets.QWidget()
+        left_panel.setFixedWidth(300)
+        left_layout = QtWidgets.QVBoxLayout(left_panel)
 
-# ===== FORCE NUMERIC =====
-df = df.apply(pd.to_numeric, errors='coerce')
-df = df.dropna()
+        title = QtWidgets.QLabel("Data Analysis Tool")
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        left_layout.addWidget(title)
 
-# ===== TIME =====
-t = (df["time"] - df["time"].iloc[0]).to_numpy()
+        # --- CSV Status ---
+        self.status_ind = StatusIndicator("CSV Status: Unloaded")
+        left_layout.addWidget(self.status_ind)
 
-# ===== EXTRACT =====
-Bx_t = df["Bx_t"].to_numpy()
-By_t = df["By_t"].to_numpy()
-Bz_t = df["Bz_t"].to_numpy()
+        # --- PID Auto Tune ---
+        pid_group = QtWidgets.QGroupBox("1. PID Auto-Tune")
+        pid_layout = QtWidgets.QVBoxLayout()
+        self.btn_pid = QtWidgets.QPushButton("Load CSV & Tune PID")
+        self.btn_pid.clicked.connect(self.run_pid_tune)
+        self.lbl_pid_out = QtWidgets.QLabel("Suggested Kp: --\nSuggested Ki: --")
+        pid_layout.addWidget(self.btn_pid)
+        pid_layout.addWidget(self.lbl_pid_out)
+        pid_group.setLayout(pid_layout)
+        left_layout.addWidget(pid_group)
 
-Bx_m = df["Bx_m"].to_numpy()
-By_m = df["By_m"].to_numpy()
-Bz_m = df["Bz_m"].to_numpy()
+        # --- Generate TF ---
+        tf_group = QtWidgets.QGroupBox("2. Generate TF (Step Response)")
+        tf_layout = QtWidgets.QVBoxLayout()
+        tf_warn = QtWidgets.QLabel("⚠️ Requires a Step Response CSV!")
+        tf_warn.setStyleSheet("color: #e67e22; font-size: 11px;")
+        self.btn_tf = QtWidgets.QPushButton("Load CSV & Gen TF")
+        self.btn_tf.clicked.connect(self.run_generate_tf)
+        self.lbl_tf_out = QtWidgets.QLabel("Gx: --\nGy: --\nGz: --")
+        tf_layout.addWidget(tf_warn)
+        tf_layout.addWidget(self.btn_tf)
+        tf_layout.addWidget(self.lbl_tf_out)
+        tf_group.setLayout(tf_layout)
+        left_layout.addWidget(tf_group)
 
-err_x = df["err_x"].to_numpy()
-err_y = df["err_y"].to_numpy()
-err_z = df["err_z"].to_numpy()
+        # --- Visualize ---
+        viz_group = QtWidgets.QGroupBox("3. Visualize")
+        viz_layout = QtWidgets.QVBoxLayout()
+        self.btn_viz = QtWidgets.QPushButton("Load CSV & Plot")
+        self.btn_viz.clicked.connect(self.run_visualize)
+        viz_layout.addWidget(self.btn_viz)
+        viz_group.setLayout(viz_layout)
+        left_layout.addWidget(viz_group)
 
-PWM_x = df["PWM_x"].to_numpy()
-PWM_y = df["PWM_y"].to_numpy()
-PWM_z = df["PWM_z"].to_numpy()
+        left_layout.addStretch()
 
-PWMb_x = df["PWMb_x"].to_numpy()
-PWMb_y = df["PWMb_y"].to_numpy()
-PWMb_z = df["PWMb_z"].to_numpy()
+        # ===== RIGHT PANEL (VISUALIZATION / OUTPUT) =====
+        right_panel = QtWidgets.QWidget()
+        self.right_layout = QtWidgets.QVBoxLayout(right_panel)
+        
+        self.canvas = MplCanvas(self, width=10, height=8, dpi=100)
+        
+        # Add the Navigation Toolbar right above the canvas
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.right_layout.addWidget(self.toolbar)
+        
+        self.right_layout.addWidget(self.canvas)
 
-# ===== METRICS =====
-def compute_metrics(target, meas):
-    steady_state_error = abs(target[-1] - meas[-1])
-    peak_error = np.max(np.abs(target - meas))
+        # Add panels to main layout
+        main_layout.addWidget(left_panel)
+        main_layout.addWidget(right_panel, stretch=1)
 
-    final = target[-1]
+        # Internal Data State
+        self.df = None
+        self.expected_cols = [
+            "time", "Bx_t","By_t","Bz_t", "Bx_m","By_m","Bz_m",
+            "PWMb_x","PWMb_y","PWMb_z", "PWM_x","PWM_y","PWM_z",
+            "err_x","err_y","err_z"
+        ]
 
-    try:
-        idx_10 = np.where(meas >= 0.1 * final)[0][0]
-        idx_90 = np.where(meas >= 0.9 * final)[0][0]
-        rise_time = t[idx_90] - t[idx_10]
-    except:
-        rise_time = np.nan
+    # ================= UTILITIES =================
+    def load_csv(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select CSV Data Log", "", "CSV Files (*.csv)")
+        if not path:
+            return False
 
-    return steady_state_error, peak_error, rise_time
+        try:
+            df = pd.read_csv(path, header=None)
+            
+            if len(df.columns) != len(self.expected_cols):
+                self.status_ind.set_color('red')
+                self.status_ind.text.setText("Invalid CSV Format!")
+                QtWidgets.QMessageBox.critical(self, "Error", f"Expected {len(self.expected_cols)} columns, got {len(df.columns)}.")
+                return False
+
+            df.columns = self.expected_cols
+            
+            # Force numeric, turn blanks into NaN
+            df = df.apply(pd.to_numeric, errors='coerce')
+            
+            # ONLY drop the row if the 'time' column is broken/missing
+            df = df.dropna(subset=["time"])
+            
+            # Fill the rest of the blanks with 0
+            df = df.fillna(0.0)
+            
+            # Normalize time
+            df["time"] = df["time"] - df["time"].iloc[0]
+            
+            self.df = df
+            self.status_ind.set_color('green')
+            self.status_ind.text.setText("CSV Loaded Successfully")
+            return True
+            
+        except Exception as e:
+            self.status_ind.set_color('red')
+            self.status_ind.text.setText("Error reading CSV")
+            print(f"Load Error: {e}")
+            return False
+
+    # ================= 1. PID AUTO TUNE =================
+    def run_pid_tune(self):
+        if not self.load_csv(): return
+
+        t = self.df["time"].to_numpy()
+        err_x = self.df["err_x"].to_numpy()
+        err_y = self.df["err_y"].to_numpy()
+        err_z = self.df["err_z"].to_numpy()
+
+        # MATLAB logic translation
+        eNorm = np.sqrt(err_x**2 + err_y**2 + err_z**2)
+        eVar = np.var(eNorm)
+        Tspan = t[-1] - t[0] if len(t) > 1 else 1.0
+        if Tspan <= 0: Tspan = 1.0
+
+        Kp_sug = 0.5 / max(1e-3, np.sqrt(eVar))
+        Ki_sug = 0.1 / max(1e-3, Tspan)
+
+        self.lbl_pid_out.setText(f"Suggested Kp: {Kp_sug:.4f}\nSuggested Ki: {Ki_sug:.4f}")
+
+    # ================= 2. GENERATE TF =================
+    def crude_first_order(self, t, target, meas):
+        # Python translation of crudeFirstOrderFromStep.m
+        U = np.max(target) - np.min(target)
+        if U == 0: return "K=0, tau=0"
+        
+        yss = meas[-1]
+        K = yss / U
+        
+        target_val = 0.632 * yss
+        idx = np.where(meas >= target_val)[0]
+        
+        if len(idx) > 0:
+            tau = t[idx[0]]
+        else:
+            tau = max(t) / 3.0
+            
+        if tau <= 0: tau = max(t) / 3.0
+        
+        return f"K={K:.3f}, τ={tau:.3f}s"
+
+    def run_generate_tf(self):
+        if not self.load_csv(): return
+
+        t = self.df["time"].to_numpy()
+        gx = self.crude_first_order(t, self.df["Bx_t"].to_numpy(), self.df["Bx_m"].to_numpy())
+        gy = self.crude_first_order(t, self.df["By_t"].to_numpy(), self.df["By_m"].to_numpy())
+        gz = self.crude_first_order(t, self.df["Bz_t"].to_numpy(), self.df["Bz_m"].to_numpy())
+
+        self.lbl_tf_out.setText(f"Gx: {gx}\nGy: {gy}\nGz: {gz}")
+
+    # ================= 3. VISUALIZE =================
+    def run_visualize(self):
+        if not self.load_csv(): return
+
+        # Clear existing plots
+        for ax in self.canvas.axes:
+            ax.clear()
+
+        df = self.df
+        
+        # EXTRACT TO NUMPY ARRAYS FIRST
+        t = df["time"].to_numpy()
+        
+        Bx_t, By_t, Bz_t = df["Bx_t"].to_numpy(), df["By_t"].to_numpy(), df["Bz_t"].to_numpy()
+        Bx_m, By_m, Bz_m = df["Bx_m"].to_numpy(), df["By_m"].to_numpy(), df["Bz_m"].to_numpy()
+        err_x, err_y, err_z = df["err_x"].to_numpy(), df["err_y"].to_numpy(), df["err_z"].to_numpy()
+        PWM_x, PWM_y, PWM_z = df["PWM_x"].to_numpy(), df["PWM_y"].to_numpy(), df["PWM_z"].to_numpy()
+        PWMb_x, PWMb_y, PWMb_z = df["PWMb_x"].to_numpy(), df["PWMb_y"].to_numpy(), df["PWMb_z"].to_numpy()
+
+        # Plot 1: Tracking
+        ax = self.canvas.axes[0]
+        ax.set_title("Tracking (Target vs Meas)")
+        ax.plot(t, Bx_t, 'r--', label="Bx_tgt")
+        ax.plot(t, Bx_m, 'r', label="Bx_m")
+        ax.plot(t, By_t, 'g--', label="By_tgt")
+        ax.plot(t, By_m, 'g', label="By_m")
+        ax.plot(t, Bz_t, 'b--', label="Bz_tgt")
+        ax.plot(t, Bz_m, 'b', label="Bz_m")
+        ax.legend(fontsize=8)
+        ax.grid()
+
+        # Plot 2: Error
+        ax = self.canvas.axes[1]
+        ax.set_title("Error")
+        ax.plot(t, err_x, 'r', label="err_x")
+        ax.plot(t, err_y, 'g', label="err_y")
+        ax.plot(t, err_z, 'b', label="err_z")
+        ax.legend(fontsize=8)
+        ax.grid()
+
+        # Plot 3: PWM Output
+        ax = self.canvas.axes[2]
+        ax.set_title("PWM Output (Total)")
+        ax.plot(t, PWM_x, 'r', label="PWM_x")
+        ax.plot(t, PWM_y, 'g', label="PWM_y")
+        ax.plot(t, PWM_z, 'b', label="PWM_z")
+        ax.legend(fontsize=8)
+        ax.grid()
+
+        # Plot 4: PWM Base vs Total PWM
+        ax = self.canvas.axes[3]
+        ax.set_title("PWM_base vs PWM_total")
+        ax.plot(t, PWMb_x, 'r--', label="Pb_x")
+        ax.plot(t, PWM_x, 'r', label="P_x")
+        ax.plot(t, PWMb_y, 'g--', label="Pb_y")
+        ax.plot(t, PWM_y, 'g', label="P_y")
+        ax.plot(t, PWMb_z, 'b--', label="Pb_z")
+        ax.plot(t, PWM_z, 'b', label="P_z")
+        ax.legend(fontsize=8)
+        ax.grid()
+
+        # Plot 5: Error Magnitude
+        ax = self.canvas.axes[4]
+        ax.set_title("Total Error Magnitude")
+        err_norm = np.sqrt(err_x**2 + err_y**2 + err_z**2)
+        ax.plot(t, err_norm, 'k')
+        ax.grid()
+
+        # Draw the updated canvas
+        self.canvas.draw()
 
 
-print("\n===== SYSTEM METRICS =====")
-for axis, tgt, meas in zip(
-    ["X","Y","Z"],
-    [Bx_t, By_t, Bz_t],
-    [Bx_m, By_m, Bz_m]
-):
-    ss, peak, rise = compute_metrics(tgt, meas)
-    print(f"{axis}: SS_err={ss:.2f}, Peak_err={peak:.2f}, Rise={rise:.2f}s")
-
-
-# ===== PLOTS =====
-plt.figure()
-plt.title("Tracking")
-plt.plot(t, Bx_t, linestyle='--', label="Bx_target")
-plt.plot(t, Bx_m, label="Bx_meas")
-plt.plot(t, By_t, linestyle='--', label="By_target")
-plt.plot(t, By_m, label="By_meas")
-plt.plot(t, Bz_t, linestyle='--', label="Bz_target")
-plt.plot(t, Bz_m, label="Bz_meas")
-plt.legend()
-plt.grid()
-
-plt.figure()
-plt.title("Error")
-plt.plot(t, err_x, label="err_x")
-plt.plot(t, err_y, label="err_y")
-plt.plot(t, err_z, label="err_z")
-plt.legend()
-plt.grid()
-
-plt.figure()
-plt.title("PWM Output")
-plt.plot(t, PWM_x, label="PWM_x")
-plt.plot(t, PWM_y, label="PWM_y")
-plt.plot(t, PWM_z, label="PWM_z")
-plt.legend()
-plt.grid()
-
-plt.figure()
-plt.title("PWM_base vs PWM")
-plt.plot(t, PWMb_x, linestyle='--', label="PWMb_x")
-plt.plot(t, PWM_x, label="PWM_x")
-plt.plot(t, PWMb_y, linestyle='--', label="PWMb_y")
-plt.plot(t, PWM_y, label="PWM_y")
-plt.plot(t, PWMb_z, linestyle='--', label="PWMb_z")
-plt.plot(t, PWM_z, label="PWM_z")
-plt.legend()
-plt.grid()
-
-plt.figure()
-plt.title("Error Magnitude")
-err_norm = np.sqrt(err_x**2 + err_y**2 + err_z**2)
-plt.plot(t, err_norm)
-plt.grid()
-
-plt.show()
+if __name__ == "__main__":
+    app = QtWidgets.QApplication(sys.argv)
+    window = DataAnalysisTool()
+    window.show()
+    sys.exit(app.exec_())

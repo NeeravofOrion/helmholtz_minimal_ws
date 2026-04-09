@@ -1,9 +1,7 @@
 import sys
 import time
 from collections import deque
-import subprocess
-import sys
-import os
+
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Vector3
@@ -147,8 +145,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         self.setWindowTitle('Helmholtz Cage GUI')
         self.resize(1400, 800)
         self._active_mode = 'constant'
-        # -------- AUTO-LAUNCH TOGGLE --------
-        
+
         root = QtWidgets.QWidget()
         root_layout = QtWidgets.QHBoxLayout()
         root_layout.setSpacing(12)
@@ -282,9 +279,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         status_inner.addWidget(self.ind_sensor)
         status_group.setLayout(status_inner)
         left_layout.addWidget(status_group)
-        self.auto_launch_cb = QtWidgets.QCheckBox("Auto-launch Analysis Tool on Exit")
-        self.auto_launch_cb.setChecked(True)
-        left_layout.addWidget(self.auto_launch_cb)
+
         left_layout.addStretch()
 
         # ===================== RIGHT PANEL — PLOTS =====================
@@ -354,26 +349,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         self.status_timer = QtCore.QTimer()
         self.status_timer.timeout.connect(self._check_telemetry_timeout)
         self.status_timer.start(1000)
-    
-    def closeEvent(self, event):
-        """This triggers automatically when you close the GUI window."""
-        if hasattr(self, 'auto_launch_cb') and self.auto_launch_cb.isChecked():
-            print("Auto-launching Data Analysis Tool...")
-            try:
-                # FIX: Point directly to your result_logs folder instead of the ROS install folder
-                analyzer_path = os.path.expanduser('~/helmholtz_minimal_ws/result_logs/anie.py')
-                
-                # Double check that the file actually exists before trying to run it
-                if not os.path.exists(analyzer_path):
-                    print(f"Error: Could not find anie.py at {analyzer_path}")
-                else:
-                    subprocess.Popen([sys.executable, analyzer_path])
-            except Exception as e:
-                print(f"Failed to launch analysis tool: {e}")
-        else:
-            print("Auto-launch disabled. Shutting down cleanly.")
-            
-        event.accept()
+
     # ===== FILE PICKERS =====
     def _browse_csv(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(

@@ -81,7 +81,7 @@ class VariableFieldNode(Node):
     # ================= CONTROL =================
     def ctrl_cb(self, msg):
         cmd = msg.data.strip()
-        self.get_logger().info(f"CMD RECEIVED: {msg.data}")
+        #self.get_logger().info(f"CMD RECEIVED: {msg.data}")
 
         if cmd.startswith("VAR_START:"):
             path = cmd.split(":", 1)[1]
@@ -113,7 +113,7 @@ class VariableFieldNode(Node):
 
     # ================= LOOP =================
     def loop(self):
-        self.get_logger().info(f"LOOP ACTIVE={self.active}, DATA={self.t_data is not None}")
+        #self.get_logger().info(f"LOOP ACTIVE={self.active}, DATA={self.t_data is not None}")
         if not self.active or self.t_data is None:
             return
 

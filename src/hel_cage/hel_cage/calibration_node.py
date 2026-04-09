@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Vector3
+from std_msgs.msg import String
 import numpy as np
 import csv
 import os
@@ -12,18 +13,27 @@ class CalibrationNode(Node):
         super().__init__('calibration_node')
 
         # ===== RESOLVE WORKSPACE ROOT =====
-        #pkg_prefix = get_package_prefix('hel_cage')
-        #ws_root = os.path.abspath(os.path.join(pkg_prefix, '..', '..', '..'))
         self.ws_root = os.path.expanduser('~/helmholtz_minimal_ws')
+        
+        # Internal Data Setup
+        self.B_data = np.array([])
+        self.PWM_data = np.array([])
 
-        csv_path = os.path.join(
-    self.ws_root,
-    'calibration_files',
-    'calibration.csv'
-)
-        # ===== BUILD CSV PATH =====
-        #csv_path = os.path.join(ws_root, 'calibration_files', 'calibration.csv')
+        default_csv_path = os.path.join(
+            self.ws_root,
+            'calibration_files',
+            'calibration.csv'
+        )
 
+        # Load default calibration on startup
+        self.load_csv(default_csv_path)
+
+        # ===== ROS INTERFACES =====
+        self.sub_cmd = self.create_subscription(Vector3, 'cmd_B', self.cmd_callback, 10)
+        self.sub_ctrl = self.create_subscription(String, 'control_cmd', self.ctrl_cb, 10)
+        self.pub = self.create_publisher(Vector3, 'pwm_base', 10)
+
+    def load_csv(self, csv_path):
         self.get_logger().info(f"Loading calibration file: {csv_path}")
 
         pwm_list = []
@@ -41,30 +51,39 @@ class CalibrationNode(Node):
                         B_list.append(abs(B))
                     except:
                         continue
+                        
+            pwm_array = np.array(pwm_list)
+            B_array = np.array(B_list)
+
+            # ===== SORT FOR INTERPOLATION =====
+            sort_idx = np.argsort(B_array)
+            self.B_data = B_array[sort_idx]
+            self.PWM_data = pwm_array[sort_idx]
+
+            self.get_logger().info(f"Loaded {len(self.B_data)} calibration points")
+            
         except FileNotFoundError:
-            self.get_logger().error("Calibration CSV not found. Check path.")
-            raise
+            self.get_logger().error(f"Calibration CSV not found at: {csv_path}. Check path.")
+        except Exception as e:
+            self.get_logger().error(f"Failed to load calibration: {e}")
 
-        pwm_array = np.array(pwm_list)
-        B_array = np.array(B_list)
-
-        # ===== SORT FOR INTERPOLATION =====
-        sort_idx = np.argsort(B_array)
-        self.B_data = B_array[sort_idx]
-        self.PWM_data = pwm_array[sort_idx]
-
-        self.get_logger().info(f"Loaded {len(self.B_data)} calibration points")
-
-        # ===== ROS INTERFACES =====
-        self.sub = self.create_subscription(Vector3, 'cmd_B', self.callback, 10)
-        self.pub = self.create_publisher(Vector3, 'pwm_base', 10)
+    def ctrl_cb(self, msg):
+        cmd = msg.data.strip()
+        # Listen for the CALIB command from the GUI
+        if cmd.startswith("CALIB:"):
+            path = cmd.split(":", 1)[1]
+            self.load_csv(path)
 
     def interp_signed(self, B):
+        # Prevent crash if data is completely empty due to a bad path
+        if len(self.B_data) == 0:
+            return 0.0
+            
         sign = np.sign(B)
         pwm_mag = np.interp(abs(B), self.B_data, self.PWM_data)
         return sign * pwm_mag
 
-    def callback(self, msg):
+    def cmd_callback(self, msg):
         out = Vector3()
         out.x = float(self.interp_signed(msg.x))
         out.y = float(self.interp_signed(msg.y))
@@ -78,3 +97,7 @@ def main():
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
