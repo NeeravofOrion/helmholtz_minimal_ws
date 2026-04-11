@@ -1,3 +1,5 @@
+import os
+from glob import glob
 from setuptools import find_packages, setup
 
 package_name = 'hel_cage'
@@ -15,9 +17,20 @@ setup(
             'share/' + package_name,
             ['package.xml'],
         ),
+        # Grabs ALL launch files (both system.launch.py and cage_bringup.launch.py)
         (
-            'share/' + package_name + '/launch',
-            ['launch/system.launch.py'],
+            os.path.join('share', package_name, 'launch'),
+            glob(os.path.join('launch', '*launch.[pxy][yma]*')),
+        ),
+        # Grabs your 3D URDF model files
+        (
+            os.path.join('share', package_name, 'urdf'),
+            glob('urdf/*'),
+        ),
+        # Grabs your saved RViz visual layouts
+        (
+            os.path.join('share', package_name, 'rviz'),
+            glob('rviz/*'),
         ),
     ],
     install_requires=['setuptools'],
@@ -37,8 +50,7 @@ setup(
             'calibration_node = hel_cage.calibration_node:main',
             'data_logger_node = hel_cage.data_logger_node:main',
             'variable_field_node = hel_cage.variable_field_node:main',
-            
-
+            'rviz_field_node = hel_cage.rviz_field_node:main',
         ],
     },
 )

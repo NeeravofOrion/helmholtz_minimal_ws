@@ -52,7 +52,7 @@ class DataAnalysisTool(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Helmholtz Cage Data Analysis Tool")
-        self.resize(1200, 800)
+        self.resize(1500, 1500)
 
         # Main Layout
         central_widget = QtWidgets.QWidget()

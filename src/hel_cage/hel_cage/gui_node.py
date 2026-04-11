@@ -145,7 +145,18 @@ class PlotWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.node = node
         self.setWindowTitle('Helmholtz Cage GUI')
-        self.resize(1400, 800)
+        screen = QtWidgets.QApplication.primaryScreen()
+        screen_size = screen.size()
+        screen_width = screen_size.width()
+        screen_height = screen_size.height()
+
+        # Calculate the exact left half
+        half_width = screen_width // 2
+
+        # Set the window position and size (x, y, width, height)
+        # x=0, y=0 is the top-left corner of your monitor
+        self.setGeometry(0, 0, half_width, screen_height)
+        self.resize(1100, 1200)
         self._active_mode = 'constant'
         # -------- AUTO-LAUNCH TOGGLE --------
         

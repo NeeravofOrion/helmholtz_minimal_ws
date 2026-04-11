@@ -4,10 +4,80 @@ from geometry_msgs.msg import Vector3
 from std_msgs.msg import String
 import numpy as np
 
+# ==========================================
+# 1. THE CONTROLLER INTERFACE
+# ==========================================
+class BaseController:
+    """All future controllers must inherit this to guarantee they have these methods."""
+    def compute(self, target: np.ndarray, current: np.ndarray, dt: float, base_pwm: np.ndarray) -> tuple:
+        raise NotImplementedError
+    
+    def reset(self):
+        raise NotImplementedError
 
+# ==========================================
+# 2. YOUR PID STRATEGY
+# ==========================================
+class PIDController(BaseController):
+    def __init__(self):
+        # Gains
+        self.kp = 0.2
+        self.ki = 0.0
+        self.kd = 0.0
+        
+        # State arrays (handles X, Y, Z simultaneously)
+        self.integral = np.zeros(3)
+        self.prev_error = np.zeros(3)
+        self.deriv = np.zeros(3)
+        
+        # Parameters
+        self.alpha = 0.2
+        self.deadband = 0.5
+
+    def update_gains(self, kp, ki, kd):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+
+    def reset(self):
+        """Clears memory (called when a new target is received)"""
+        self.integral.fill(0.0)
+        self.prev_error.fill(0.0)
+        self.deriv.fill(0.0)
+
+    def compute(self, target: np.ndarray, current: np.ndarray, dt: float, base_pwm: np.ndarray) -> tuple:
+        # Calculate error for all 3 axes
+        error = target - current
+
+        # DEADBAND: Force error to 0 if within threshold
+        error[np.abs(error) < self.deadband] = 0.0
+
+        # INTEGRAL: Add error with anti-windup clamping (-100 to 100)
+        self.integral = np.clip(self.integral + (error * dt), -100.0, 100.0)
+
+        # DERIVATIVE: Filtered derivative
+        self.deriv = self.alpha * ((error - self.prev_error) / dt) + (1 - self.alpha) * self.deriv
+        self.prev_error = error.copy() # Store for next loop
+
+        # PID OUTPUT
+        pid_out = (self.kp * error) + (self.ki * self.integral) + (self.kd * self.deriv)
+
+        # FINAL OUTPUT: Add base and clamp to PWM limits
+        final_out = np.clip(base_pwm + pid_out, -255.0, 255.0)
+
+        return error, final_out
+
+# ==========================================
+# 3. THE ROS 2 NODE (Wraps the controller)
+# ==========================================
 class ControlNode(Node):
     def __init__(self):
         super().__init__('control_node')
+
+        # ===== LOAD CONTROLLER =====
+        # To change control strategies later, just change this one line:
+        # self.controller = SomeOtherAdvancedController()
+        self.controller = PIDController()
 
         # ===== SUBS =====
         self.create_subscription(Vector3, 'telemetry',    self.tel_cb,  10)
@@ -21,22 +91,11 @@ class ControlNode(Node):
         self.error_pub = self.create_publisher(Vector3, 'error',   10)
 
         # ===== STATE =====
-        self.target  = Vector3()
-        self.current = Vector3()
+        # Using numpy arrays natively makes passing data to the controller easier
+        self.target  = np.zeros(3)
+        self.current = np.zeros(3)
+        self.pwm_base = np.zeros(3)
         self.control_enabled = False
-
-        # ===== CALIBRATION BASE =====
-        self.pwm_base = np.array([0.0, 0.0, 0.0])
-
-        # ===== PID GAINS =====
-        self.kp = 0.2
-        self.ki = 0.0
-        self.kd = 0.0
-
-        # ===== PID STATE =====
-        self.int_x = self.int_y = self.int_z = 0.0
-        self.prev_x = self.prev_y = self.prev_z = 0.0
-        self.d_x = self.d_y = self.d_z = 0.0
 
         # ===== TIMING =====
         self.last_time = self.get_clock().now()
@@ -46,17 +105,15 @@ class ControlNode(Node):
 
     # ===== CALLBACKS =====
     def tel_cb(self, msg: Vector3):
-        self.current = msg
+        self.current = np.array([msg.x, msg.y, msg.z])
 
     def cmd_cb(self, msg: Vector3):
-        self.target = msg
-        self.int_x = self.int_y = self.int_z = 0.0
-        self.prev_x = self.prev_y = self.prev_z = 0.0
+        self.target = np.array([msg.x, msg.y, msg.z])
+        self.controller.reset() # Reset the controller memory on new command
 
     def pid_cb(self, msg: Vector3):
-        self.kp = msg.x
-        self.ki = msg.y
-        self.kd = msg.z
+        if hasattr(self.controller, 'update_gains'):
+            self.controller.update_gains(msg.x, msg.y, msg.z)
 
     def base_cb(self, msg: Vector3):
         self.pwm_base = np.array([msg.x, msg.y, msg.z])
@@ -84,63 +141,33 @@ class ControlNode(Node):
             return
         dt = min(dt, 0.02)
 
-        ex = self.target.x - self.current.x
-        ey = self.target.y - self.current.y
-        ez = self.target.z - self.current.z
-
-        # DEADBAND
-        DB = 0.5
-        if abs(ex) < DB: ex = 0.0
-        if abs(ey) < DB: ey = 0.0
-        if abs(ez) < DB: ez = 0.0
+        # --- EXECUTE THE MODULAR CONTROL STRATEGY ---
+        error, pwm_out = self.controller.compute(self.target, self.current, dt, self.pwm_base)
 
         # Publish error
-        err_msg = Vector3()
-        err_msg.x, err_msg.y, err_msg.z = ex, ey, ez
+        err_msg = Vector3(x=float(error[0]), y=float(error[1]), z=float(error[2]))
         self.error_pub.publish(err_msg)
 
-        # INTEGRAL
-        self.int_x = max(min(self.int_x + ex * dt, 100), -100)
-        self.int_y = max(min(self.int_y + ey * dt, 100), -100)
-        self.int_z = max(min(self.int_z + ez * dt, 100), -100)
+        # Publish PWM
+        out_msg = Vector3(x=float(pwm_out[0]), y=float(pwm_out[1]), z=float(pwm_out[2]))
+        self.pwm_pub.publish(out_msg)
 
-        # DERIVATIVE (filtered)
-        alpha = 0.2
-        self.d_x = alpha * (ex - self.prev_x) / dt + (1 - alpha) * self.d_x
-        self.d_y = alpha * (ey - self.prev_y) / dt + (1 - alpha) * self.d_y
-        self.d_z = alpha * (ez - self.prev_z) / dt + (1 - alpha) * self.d_z
-
-        self.prev_x = ex
-        self.prev_y = ey
-        self.prev_z = ez
-
-        # PID OUTPUT
-        cx = self.kp * ex + self.ki * self.int_x + self.kd * self.d_x
-        cy = self.kp * ey + self.ki * self.int_y + self.kd * self.d_y
-        cz = self.kp * ez + self.ki * self.int_z + self.kd * self.d_z
-
-        ux = max(min(self.pwm_base[0] + cx, 255), -255)
-        uy = max(min(self.pwm_base[1] + cy, 255), -255)
-        uz = max(min(self.pwm_base[2] + cz, 255), -255)
-
-        out = Vector3()
-        out.x, out.y, out.z = float(ux), float(uy), float(uz)
-        self.pwm_pub.publish(out)
-
+        # Logging
         if (now - self.last_log).nanoseconds > 200_000_000:
             self.get_logger().info(
-                f'ERR: {ex:.2f},{ey:.2f},{ez:.2f} | PWM: {ux:.2f},{uy:.2f},{uz:.2f}'
+                f'ERR: {error[0]:.2f},{error[1]:.2f},{error[2]:.2f} | PWM: {pwm_out[0]:.2f},{pwm_out[1]:.2f},{pwm_out[2]:.2f}'
             )
             self.last_log = now
-
 
 def main(args=None):
     rclpy.init(args=args)
     node = ControlNode()
-    rclpy.spin(node)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     node.destroy_node()
     rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
