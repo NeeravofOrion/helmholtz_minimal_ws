@@ -97,4 +97,10 @@ def generate_launch_description():
             output='screen',
             arguments=['-d', rviz_config_file]
         ),
+        Node(
+            package='hel_cage',
+            executable='auto_sweep_node',
+            name='auto_sweep_node',
+            output='screen'
+        ),
     ])

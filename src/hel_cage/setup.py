@@ -51,6 +51,7 @@ setup(
             'data_logger_node = hel_cage.data_logger_node:main',
             'variable_field_node = hel_cage.variable_field_node:main',
             'rviz_field_node = hel_cage.rviz_field_node:main',
+            'auto_sweep_node = hel_cage.auto_sweep_node:main'
         ],
     },
 )

@@ -217,42 +217,21 @@ class PlotWindow(QtWidgets.QMainWindow):
         self.csv_group.setLayout(csv_inner)
         self.csv_group.setVisible(False)
         left_layout.addWidget(self.csv_group)
-       
+
         # ── Calibration File ──
         calib_group = QtWidgets.QGroupBox('Calibration File')
         calib_inner = QtWidgets.QVBoxLayout()
         calib_row = QtWidgets.QHBoxLayout()
-        
         self.calib_path = QtWidgets.QLineEdit()
         self.calib_path.setPlaceholderText('Default calibration loaded')
-        
         calib_browse_btn = QtWidgets.QPushButton('Browse')
         calib_browse_btn.clicked.connect(self._browse_calib)
-        
         calib_row.addWidget(self.calib_path)
         calib_row.addWidget(calib_browse_btn)
-        
-        # 1. The button to load an existing file
         self.calib_load_btn = QtWidgets.QPushButton('Load Calibration')
         self.calib_load_btn.clicked.connect(self.load_calibration)
-        
-        # 2. ADD THE NEW INITIALIZATION BUTTONS HERE
-        self.btn_init_apply = QtWidgets.QPushButton("Run Initialization & Apply")
-        self.btn_init_save = QtWidgets.QPushButton("Run Initialization (Save Only)")
-        
-        # Style them slightly different so they stand out
-        self.btn_init_apply.setStyleSheet("background-color: #3498db; color: white;")
-        
-        # Connect the clicks to your existing functions
-        self.btn_init_apply.clicked.connect(self.run_initialization_and_apply)
-        self.btn_init_save.clicked.connect(self.run_initialization_save_only)
-        
-        # Add everything to the layout
         calib_inner.addLayout(calib_row)
         calib_inner.addWidget(self.calib_load_btn)
-        calib_inner.addWidget(self.btn_init_apply) # <--- Added to UI
-        calib_inner.addWidget(self.btn_init_save)  # <--- Added to UI
-        
         calib_group.setLayout(calib_inner)
         left_layout.addWidget(calib_group)
 
@@ -315,7 +294,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         status_group.setLayout(status_inner)
         left_layout.addWidget(status_group)
         self.auto_launch_cb = QtWidgets.QCheckBox("Auto-launch Analysis Tool on Exit")
-        self.auto_launch_cb.setChecked(False)
+        self.auto_launch_cb.setChecked(True)
         left_layout.addWidget(self.auto_launch_cb)
         left_layout.addStretch()
 
@@ -532,20 +511,6 @@ class PlotWindow(QtWidgets.QMainWindow):
             )
         except:
             print('Invalid PID input')
-
-    def run_initialization_and_apply(self):
-     """Runs the 0-255 sweep and immediately tells the system to use it."""
-     msg = String()
-     msg.data = "SWEEP:APPLY"
-     self.node.ctrl_pub.publish(msg) 
-     print("Sent SWEEP:APPLY command to ROS.")
- 
-    def run_initialization_save_only(self):
-        """Runs the 0-255 sweep but just saves the file; doesn't update live math."""
-        msg = String()
-        msg.data = "SWEEP:SAVE_ONLY"
-        self.node.ctrl_pub.publish(msg)
-        print("Sent SWEEP:SAVE_ONLY command to ROS.")
 
     # ===== PLOT =====
     def update_plot(self):
