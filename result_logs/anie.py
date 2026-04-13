@@ -193,24 +193,47 @@ class DataAnalysisTool(QtWidgets.QMainWindow):
         self.lbl_pid_out.setText(f"Suggested Kp: {Kp_sug:.4f}\nSuggested Ki: {Ki_sug:.4f}")
 
     # ================= 2. GENERATE TF =================
+    # ================= 2. GENERATE TF =================
     def crude_first_order(self, t, target, meas):
-        # Python translation of crudeFirstOrderFromStep.m
-        U = np.max(target) - np.min(target)
-        if U == 0: return "K=0, tau=0"
+        # 1. Find the step size and direction
+        U = target[-1] - target[0] 
+        if abs(U) < 1e-3: 
+            return "K=0, tau=0"
         
-        yss = meas[-1]
-        K = yss / U
+        # 2. Find exactly WHEN the step command was sent
+        step_indices = np.where(np.abs(target - target[0]) > 1e-3)[0]
+        step_start_time = t[step_indices[0]] if len(step_indices) > 0 else 0.0
         
-        target_val = 0.632 * yss
-        idx = np.where(meas >= target_val)[0]
+        # 3. Calculate Gain (K)
+        # Use the average of the first and last 10 points to avoid noise spikes
+        start_meas = np.mean(meas[:10])
+        end_meas = np.mean(meas[-10:])
+        yss_change = end_meas - start_meas
         
-        if len(idx) > 0:
-            tau = t[idx[0]]
+        K = yss_change / U
+        
+        # 4. Find Time Constant (Tau)
+        # Apply a 5-point moving average to smooth out magnetometer noise
+        meas_smooth = pd.Series(meas).rolling(window=5, min_periods=1).mean().to_numpy()
+        
+        # The target is 63.2% of the journey from the start value to the end value
+        target_val = start_meas + (0.632 * yss_change)
+        
+        # Look for the target ONLY after the step was actually commanded
+        if U > 0: # Positive step
+            valid_idx = np.where((t >= step_start_time) & (meas_smooth >= target_val))[0]
+        else:     # Negative step
+            valid_idx = np.where((t >= step_start_time) & (meas_smooth <= target_val))[0]
+            
+        if len(valid_idx) > 0:
+            # Tau is the time it hit 63.2% MINUS the time the command was sent
+            tau = t[valid_idx[0]] - step_start_time
         else:
             tau = max(t) / 3.0
             
-        if tau <= 0: tau = max(t) / 3.0
-        
+        if tau <= 0: 
+            tau = max(t) / 3.0
+            
         return f"K={K:.3f}, τ={tau:.3f}s"
 
     def run_generate_tf(self):
