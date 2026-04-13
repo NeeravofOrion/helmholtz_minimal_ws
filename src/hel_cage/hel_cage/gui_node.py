@@ -362,12 +362,12 @@ class PlotWindow(QtWidgets.QMainWindow):
         self.curve_pz = self.plot_pwm.plot(pen='b',  name='Pz')
 
         # Error scale: ±50 µT reasonable starting point
-        self.plot_err.setYRange(-150, 150)
-        self.plot_err.setLimits(yMin=-150, yMax=150)
+        self.plot_err.setYRange(-200, 200)
+        self.plot_err.setLimits(yMin=-200, yMax=200)
 
         # PWM scale: ±260
-        self.plot_pwm.setYRange(-160, 160)
-        self.plot_pwm.setLimits(yMin=-160, yMax=160)
+        self.plot_pwm.setYRange(-260, 260)
+        self.plot_pwm.setLimits(yMin=-260, yMax=260)
 
         self.extra_widget.setVisible(False)
         right_layout.addWidget(self.extra_widget, stretch=2)

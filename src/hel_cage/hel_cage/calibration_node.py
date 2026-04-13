@@ -6,134 +6,138 @@ from std_msgs.msg import String
 import numpy as np
 import csv
 import os
+from scipy.interpolate import CubicSpline
 
 class CalibrationNode(Node):
     def __init__(self):
         super().__init__('calibration_node')
 
-        # ===== WORKSPACE RESOLUTION =====
+        # ===== RESOLVE WORKSPACE ROOT =====
         self.ws_root = os.path.expanduser('~/helmholtz_minimal_ws')
         
-        # ===== INDEPENDENT AXIS ARRAYS =====
-        # We store separate B (Magnetic Field) and PWM arrays for each axis.
-        # This is critical because sensor noise requires independent sorting for interpolation.
-        self.B_x = np.array([]); self.PWM_x = np.array([])
-        self.B_y = np.array([]); self.PWM_y = np.array([])
-        self.B_z = np.array([]); self.PWM_z = np.array([])
+        # Internal Data Setup (Independent for X, Y, Z)
+        self.splines = {'x': None, 'y': None, 'z': None}
+        self.max_b = {'x': 0.0, 'y': 0.0, 'z': 0.0}
 
-        # ===== LOAD DEFAULT (If available) =====
-        # Try to load the most recent master calibration if it exists
-        self.calib_dir = os.path.join(self.ws_root, 'calibration_files')
-        self._load_latest_master()
+        default_csv_path = os.path.join(
+            self.ws_root,
+            'calibration_files',
+            'calibration.csv' # Make sure this matches your dummy/real filename
+        )
+
+        # Load default calibration on startup
+        self.load_csv(default_csv_path)
 
         # ===== ROS INTERFACES =====
-        # Listens for target field commands (µT) from GUI
-        self.sub_cmd = self.create_subscription(Vector3, 'cmd_B', self.cmd_callback, 10)
+        # Listens to the Commanded Field from the PID node
+        self.sub_cmd = self.create_subscription(Vector3, 'b_cmd_internal', self.cmd_callback, 10)
         
-        # Listens for file updates from the AutoSweepNode
+        # Listens for GUI Calibration Updates from Auto-Sweep
         self.sub_ctrl = self.create_subscription(String, 'control_cmd', self.ctrl_cb, 10)
         
-        # Publishes Feedforward base PWM to the Control Node
-        self.pub = self.create_publisher(Vector3, 'pwm_base', 10)
+        # Publishes the final hardware signal to the Bridge
+        self.pub = self.create_publisher(Vector3, 'pwm_cmd', 10)
         
-        self.get_logger().info("3-Axis Feedforward Calibration Node Ready.")
-
-    def _load_latest_master(self):
-        """Helper to find and load the newest master_calib file on startup."""
-        if not os.path.exists(self.calib_dir):
-            return
-            
-        files = [f for f in os.listdir(self.calib_dir) if f.startswith('master_calib_')]
-        if files:
-            # Sort by filename (which includes the Unix timestamp) to get the newest
-            latest_file = sorted(files)[-1]
-            path = os.path.join(self.calib_dir, latest_file)
-            self.load_csv(path)
-        else:
-            self.get_logger().warn("No master calibration files found. Awaiting Auto-Sweep.")
+        self.get_logger().info("Calibration Node (Feedforward) Ready.")
 
     def load_csv(self, csv_path):
-        self.get_logger().info(f"Loading Master Calibration: {csv_path}")
+        self.get_logger().info(f"Loading 4-Column Spline calibration: {csv_path}")
 
         pwm_raw, bx_raw, by_raw, bz_raw = [], [], [], []
 
-        # ===== READ 4-COLUMN CSV =====
+        # ===== LOAD CSV =====
         try:
             with open(csv_path, 'r') as f:
                 reader = csv.reader(f)
                 for row in reader:
                     try:
-                        # Format: [PWM, Bx, By, Bz]
-                        # We use abs() because the Helmholtz coil response is symmetric
+                        # CSV Format: [PWM, Bx, By, Bz]
                         pwm_raw.append(abs(float(row[0])))
                         bx_raw.append(abs(float(row[1])))
                         by_raw.append(abs(float(row[2])))
                         bz_raw.append(abs(float(row[3])))
-                    except ValueError:
-                        continue # Skip header or corrupted rows
-                        
-            # Convert to numpy arrays for fast math
+                    except (IndexError, ValueError):
+                        continue
+
+            if not pwm_raw:
+                self.get_logger().error("CSV loaded but contains no valid data rows.")
+                return
+
+            # ===== AMBIENT BASELINE REMOVAL =====
+            # The first row represents the Earth's ambient field in the lab
+            amb_x, amb_y, amb_z = bx_raw[0], by_raw[0], bz_raw[0]
+            
+            # Clean the data by subtracting the ambient baseline
+            bx_clean = [abs(b - amb_x) for b in bx_raw]
+            by_clean = [abs(b - amb_y) for b in by_raw]
+            bz_clean = [abs(b - amb_z) for b in bz_raw]
+
+            # Convert to numpy arrays
             pwm_arr = np.array(pwm_raw)
-            bx_arr = np.array(bx_raw)
-            by_arr = np.array(by_raw)
-            bz_arr = np.array(bz_raw)
+            bx_arr = np.array(bx_clean)
+            by_arr = np.array(by_clean)
+            bz_arr = np.array(bz_clean)
 
-            # ===== INDEPENDENT SORTING =====
-            # np.interp strictly requires the "x" array (the B field) to be monotonically increasing.
-            # Because of sensor noise, we MUST sort each axis independently.
-            idx_x = np.argsort(bx_arr)
-            self.B_x = bx_arr[idx_x]
-            self.PWM_x = pwm_arr[idx_x]
+            # ===== SORT, REMOVE DUPLICATES, AND BUILD SPLINES =====
+            # np.unique automatically sorts lowest-to-highest and drops duplicate sensor readings
+            # This prevents the CubicSpline "x must be strictly increasing" crash
+            
+            # X-Axis Spline
+            bx_unique, idx_x = np.unique(bx_arr, return_index=True)
+            self.splines['x'] = CubicSpline(bx_unique, pwm_arr[idx_x])
+            self.max_b['x'] = bx_unique[-1]
 
-            idx_y = np.argsort(by_arr)
-            self.B_y = by_arr[idx_y]
-            self.PWM_y = pwm_arr[idx_y]
+            # Y-Axis Spline
+            by_unique, idx_y = np.unique(by_arr, return_index=True)
+            self.splines['y'] = CubicSpline(by_unique, pwm_arr[idx_y])
+            self.max_b['y'] = by_unique[-1]
 
-            idx_z = np.argsort(bz_arr)
-            self.B_z = bz_arr[idx_z]
-            self.PWM_z = pwm_arr[idx_z]
+            # Z-Axis Spline
+            bz_unique, idx_z = np.unique(bz_arr, return_index=True)
+            self.splines['z'] = CubicSpline(bz_unique, pwm_arr[idx_z])
+            self.max_b['z'] = bz_unique[-1]
 
-            self.get_logger().info("Successfully built 3-Axis Feedforward interpolation tables.")
+            self.get_logger().info(f"3-Axis Splines successfully built. Baselines removed -> X:{amb_x:.1f} Y:{amb_y:.1f} Z:{amb_z:.1f}")
             
         except FileNotFoundError:
-            self.get_logger().error(f"File not found: {csv_path}")
+            self.get_logger().error(f"Calibration CSV not found at: {csv_path}")
         except Exception as e:
             self.get_logger().error(f"Failed to load calibration: {e}")
 
     def ctrl_cb(self, msg):
-        """Listens for the automatic broadcast from the Auto-Sweep Node."""
+        """Listens for new calibration files generated by Auto-Sweep."""
         cmd = msg.data.strip()
         if cmd.startswith("CALIB:"):
-            # Extract the file path sent by AutoSweepNode
             path = cmd.split(":", 1)[1]
             self.load_csv(path)
 
-    def interp_signed(self, target_B, B_array, PWM_array):
-        """Calculates the required PWM for a requested magnetic field."""
-        # Safety catch if tables aren't loaded yet
-        if len(B_array) == 0:
+    def calculate_pwm(self, B_cmd, axis):
+        """Translates Physics (µT) to Hardware (PWM)."""
+        # Safety catch if splines failed to load or command is basically zero
+        if self.splines[axis] is None or abs(B_cmd) < 1e-3:
             return 0.0
             
-        # 1. Grab the direction (+ or -)
-        sign = np.sign(target_B)
+        sign = np.sign(B_cmd)
+        abs_b = abs(B_cmd)
         
-        # 2. Interpolate the magnitude
-        # np.interp(target_x, recorded_x, recorded_y)
-        pwm_mag = np.interp(abs(target_B), B_array, PWM_array)
+        # Clamp the requested field to the maximum tested field to prevent spline extrapolation errors
+        abs_b = min(abs_b, self.max_b[axis])
         
-        # 3. Re-apply direction
-        return sign * pwm_mag
+        # Direct Spline translation
+        pwm_raw = float(self.splines[axis](abs_b))
+        
+        # Clip to Arduino hardware limits
+        pwm_final = np.clip(pwm_raw, 0.0, 255.0)
+        
+        return float(sign * pwm_final)
 
     def cmd_callback(self, msg):
-        """Fires every time the GUI requests a new magnetic field."""
         out = Vector3()
+        # Process each axis through its dedicated feedforward spline
+        out.x = self.calculate_pwm(msg.x, 'x')
+        out.y = self.calculate_pwm(msg.y, 'y')
+        out.z = self.calculate_pwm(msg.z, 'z')
         
-        # Independently calculate feedforward for each axis
-        out.x = float(self.interp_signed(msg.x, self.B_x, self.PWM_x))
-        out.y = float(self.interp_signed(msg.y, self.B_y, self.PWM_y))
-        out.z = float(self.interp_signed(msg.z, self.B_z, self.PWM_z))
-        
-        # Publish the baseline guess to the PID Control Node
         self.pub.publish(out)
 
 def main(args=None):

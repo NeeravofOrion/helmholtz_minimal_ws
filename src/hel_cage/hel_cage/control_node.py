@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Vector3
@@ -5,34 +6,17 @@ from std_msgs.msg import String
 import numpy as np
 
 # ==========================================
-# 1. THE CONTROLLER INTERFACE
+# PID STRATEGY (Physics Units: µT)
 # ==========================================
-class BaseController:
-    """All future controllers must inherit this to guarantee they have these methods."""
-    def compute(self, target: np.ndarray, current: np.ndarray, dt: float, base_pwm: np.ndarray) -> tuple:
-        raise NotImplementedError
-    
-    def reset(self):
-        raise NotImplementedError
-
-# ==========================================
-# 2. YOUR PID STRATEGY
-# ==========================================
-class PIDController(BaseController):
+class ClassicPIDController:
     def __init__(self):
-        # Gains
-        self.kp = 0.2
-        self.ki = 0.0
+        # Default gains (Tuned for magnetic flux correction)
+        self.kp = 1.2784
+        self.ki = 0.5 
         self.kd = 0.0
         
-        # State arrays (handles X, Y, Z simultaneously)
         self.integral = np.zeros(3)
         self.prev_error = np.zeros(3)
-        self.deriv = np.zeros(3)
-        
-        # Parameters
-        self.alpha = 0.2
-        self.deadband = 0.5
 
     def update_gains(self, kp, ki, kd):
         self.kp = kp
@@ -40,124 +24,111 @@ class PIDController(BaseController):
         self.kd = kd
 
     def reset(self):
-        """Clears memory (called when a new target is received)"""
+        """Wipes memory to prevent integral windup on restart."""
         self.integral.fill(0.0)
         self.prev_error.fill(0.0)
-        self.deriv.fill(0.0)
 
-    def compute(self, target: np.ndarray, current: np.ndarray, dt: float, base_pwm: np.ndarray) -> tuple:
-        # Calculate error for all 3 axes
+    def compute(self, target: np.ndarray, current: np.ndarray, dt: float) -> tuple:
+        # 1. Error in Physics Units (µT)
         error = target - current
-
-        # DEADBAND: Force error to 0 if within threshold
-        error[np.abs(error) < self.deadband] = 0.0
-
-        # INTEGRAL: Add error with anti-windup clamping (-100 to 100)
-        self.integral = np.clip(self.integral + (error * dt), -100.0, 100.0)
-
-        # DERIVATIVE: Filtered derivative
-        self.deriv = self.alpha * ((error - self.prev_error) / dt) + (1 - self.alpha) * self.deriv
-        self.prev_error = error.copy() # Store for next loop
-
-        # PID OUTPUT
-        pid_out = (self.kp * error) + (self.ki * self.integral) + (self.kd * self.deriv)
-
-        # FINAL OUTPUT: Add base and clamp to PWM limits
-        final_out = np.clip(base_pwm + pid_out, -255.0, 255.0)
-
-        return error, final_out
+        
+        # 2. PID Math
+        self.integral += error * dt
+        
+        # Anti-windup (prevent math explosions if hardware maxes out)
+        self.integral = np.clip(self.integral, -1000.0, 1000.0) 
+        
+        deriv = (error - self.prev_error) / dt
+        self.prev_error = error
+        
+        # 3. Control Effort (u) in Physics Units (µT)
+        u = (self.kp * error) + (self.ki * self.integral) + (self.kd * deriv)
+        
+        # 4. Final Commanded Magnetic Field (Feedforward baseline + PID correction)
+        B_cmd = target + u
+        
+        return error, B_cmd
 
 # ==========================================
-# 3. THE ROS 2 NODE (Wraps the controller)
+# ROS 2 NODE
 # ==========================================
 class ControlNode(Node):
     def __init__(self):
         super().__init__('control_node')
+        self.controller = ClassicPIDController()
 
-        # ===== LOAD CONTROLLER =====
-        # To change control strategies later, just change this one line:
-        # self.controller = SomeOtherAdvancedController()
-        self.controller = PIDController()
-
-        # ===== SUBS =====
-        self.create_subscription(Vector3, 'telemetry',    self.tel_cb,  10)
-        self.create_subscription(Vector3, 'cmd_B',        self.cmd_cb,  10)
-        self.create_subscription(String,  'control_cmd',  self.ctrl_cb, 10)
-        self.create_subscription(Vector3, 'pid_gain',     self.pid_cb,  10)
-        self.create_subscription(Vector3, 'pwm_base',     self.base_cb, 10)
-
-        # ===== PUBS =====
-        self.pwm_pub   = self.create_publisher(Vector3, 'pwm_cmd', 10)
-        self.error_pub = self.create_publisher(Vector3, 'error',   10)
-
-        # ===== STATE =====
-        # Using numpy arrays natively makes passing data to the controller easier
-        self.target  = np.zeros(3)
+        # State Variables
+        self.target = np.zeros(3)
         self.current = np.zeros(3)
-        self.pwm_base = np.zeros(3)
         self.control_enabled = False
+        
+        # EMA smoothing factor for sensor noise (0.0 = ignore new, 1.0 = no filter)
+        self.alpha = 0.7  
 
-        # ===== TIMING =====
+        # ===== ROS INTERFACES =====
+        # Inputs
+        self.sub_cmd = self.create_subscription(Vector3, 'cmd_B', self.cmd_cb, 10)
+        self.sub_tel = self.create_subscription(Vector3, 'telemetry', self.tel_cb, 10)
+        self.sub_ctrl = self.create_subscription(String, 'control_cmd', self.ctrl_cb, 10)
+        self.sub_pid = self.create_subscription(Vector3, 'pid_gain', self.pid_cb, 10)
+
+        # Outputs (Passed to Calibration Node for PWM conversion)
+        self.b_cmd_pub = self.create_publisher(Vector3, 'b_cmd_internal', 10)
+        self.error_pub = self.create_publisher(Vector3, 'error', 10)
+
+        # 50Hz Control Loop
         self.last_time = self.get_clock().now()
-        self.last_log  = self.get_clock().now()
+        self.timer = self.create_timer(0.02, self.control_loop)
+        
+        self.get_logger().info("Control Node Ready. Awaiting 'START' command.")
 
-        self.create_timer(0.02, self.control_loop)
-
-    # ===== CALLBACKS =====
-    def tel_cb(self, msg: Vector3):
-        self.current = np.array([msg.x, msg.y, msg.z])
-
-    def cmd_cb(self, msg: Vector3):
+    def cmd_cb(self, msg):
         self.target = np.array([msg.x, msg.y, msg.z])
-        self.controller.reset() # Reset the controller memory on new command
 
-    def pid_cb(self, msg: Vector3):
-        if hasattr(self.controller, 'update_gains'):
-            self.controller.update_gains(msg.x, msg.y, msg.z)
+    def tel_cb(self, msg):
+        raw_sensor = np.array([msg.x, msg.y, msg.z])
+        # EMA Filter: smooths out magnetometer jitter before it hits the PID
+        self.current = (self.alpha * raw_sensor) + ((1.0 - self.alpha) * self.current)
 
-    def base_cb(self, msg: Vector3):
-        self.pwm_base = np.array([msg.x, msg.y, msg.z])
+    def pid_cb(self, msg):
+        self.controller.update_gains(msg.x, msg.y, msg.z)
+        self.get_logger().info(f"PID Gains Updated -> Kp: {msg.x:.2f}, Ki: {msg.y:.2f}, Kd: {msg.z:.2f}")
 
-    def ctrl_cb(self, msg: String):
+    def ctrl_cb(self, msg):
         cmd = msg.data.strip().upper()
         if cmd == 'START':
             self.control_enabled = True
             self.last_time = self.get_clock().now()
+            self.controller.reset() # Crucial: clears old windup
+            self.get_logger().info("Control Loop ENGAGED.")
+            
         elif cmd == 'STOP':
             self.control_enabled = False
-            zero = Vector3()
-            self.pwm_pub.publish(zero)
+            self.b_cmd_pub.publish(Vector3()) # Safely zero out the requested field
+            self.get_logger().info("Control Loop STOPPED. Coils zeroed.")
 
-    # ===== CONTROL LOOP =====
     def control_loop(self):
         if not self.control_enabled:
             return
 
         now = self.get_clock().now()
-        dt  = (now - self.last_time).nanoseconds * 1e-9
+        dt = (now - self.last_time).nanoseconds * 1e-9
         self.last_time = now
 
-        if dt <= 0:
-            return
+        # Failsafe for timing glitches
+        if dt <= 0: return
         dt = min(dt, 0.02)
 
-        # --- EXECUTE THE MODULAR CONTROL STRATEGY ---
-        error, pwm_out = self.controller.compute(self.target, self.current, dt, self.pwm_base)
+        # Calculate Error and total Commanded Field (Target + PID Effort)
+        error, b_cmd_out = self.controller.compute(self.target, self.current, dt)
 
-        # Publish error
+        # Publish error for GUI monitoring
         err_msg = Vector3(x=float(error[0]), y=float(error[1]), z=float(error[2]))
         self.error_pub.publish(err_msg)
 
-        # Publish PWM
-        out_msg = Vector3(x=float(pwm_out[0]), y=float(pwm_out[1]), z=float(pwm_out[2]))
-        self.pwm_pub.publish(out_msg)
-
-        # Logging
-        if (now - self.last_log).nanoseconds > 200_000_000:
-            self.get_logger().info(
-                f'ERR: {error[0]:.2f},{error[1]:.2f},{error[2]:.2f} | PWM: {pwm_out[0]:.2f},{pwm_out[1]:.2f},{pwm_out[2]:.2f}'
-            )
-            self.last_log = now
+        # Publish internal command to the Calibration Node
+        cmd_msg = Vector3(x=float(b_cmd_out[0]), y=float(b_cmd_out[1]), z=float(b_cmd_out[2]))
+        self.b_cmd_pub.publish(cmd_msg)
 
 def main(args=None):
     rclpy.init(args=args)
@@ -166,8 +137,9 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-    node.destroy_node()
-    rclpy.shutdown()
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
