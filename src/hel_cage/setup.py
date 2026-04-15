@@ -47,7 +47,7 @@ setup(
             'cmd_publisher = hel_cage.cmd_publisher:main',
             'fft_node = hel_cage.fft_node:main',
             'control_node = hel_cage.control_node:main',
-            'calibration_node = hel_cage.calibration_node:main',
+            'feedfwd_node = hel_cage.feedfwd_node:main',
             'data_logger_node = hel_cage.data_logger_node:main',
             'variable_field_node = hel_cage.variable_field_node:main',
             'rviz_field_node = hel_cage.rviz_field_node:main',

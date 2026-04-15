@@ -10,7 +10,7 @@ from scipy.interpolate import CubicSpline
 
 class CalibrationNode(Node):
     def __init__(self):
-        super().__init__('calibration_node')
+        super().__init__('feedfwd_node')
 
         # ===== RESOLVE WORKSPACE ROOT =====
         self.ws_root = os.path.expanduser('~/helmholtz_minimal_ws')

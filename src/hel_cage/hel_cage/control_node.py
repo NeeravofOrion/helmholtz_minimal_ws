@@ -7,10 +7,11 @@ import numpy as np
 
 # ==========================================
 # PID STRATEGY (Physics Units: µT)
+# Matches MATLAB: Bcmd = target + u
 # ==========================================
 class ClassicPIDController:
     def __init__(self):
-        # Default gains (Tuned for magnetic flux correction)
+        # Default gains
         self.kp = 1.2784
         self.ki = 0.5 
         self.kd = 0.0
@@ -41,10 +42,10 @@ class ClassicPIDController:
         deriv = (error - self.prev_error) / dt
         self.prev_error = error
         
-        # 3. Control Effort (u) in Physics Units (µT)
+        # 3. Control Effort (u) - This is the CORRECTION
         u = (self.kp * error) + (self.ki * self.integral) + (self.kd * deriv)
         
-        # 4. Final Commanded Magnetic Field (Feedforward baseline + PID correction)
+        # 4. Final Commanded Magnetic Field (BASE TARGET + CORRECTION)
         B_cmd = target + u
         
         return error, B_cmd
@@ -62,25 +63,24 @@ class ControlNode(Node):
         self.current = np.zeros(3)
         self.control_enabled = False
         
-        # EMA smoothing factor for sensor noise (0.0 = ignore new, 1.0 = no filter)
+        # EMA smoothing factor for sensor noise (Matches MATLAB alpha = 0.7)
         self.alpha = 0.7  
 
         # ===== ROS INTERFACES =====
-        # Inputs
         self.sub_cmd = self.create_subscription(Vector3, 'cmd_B', self.cmd_cb, 10)
         self.sub_tel = self.create_subscription(Vector3, 'telemetry', self.tel_cb, 10)
         self.sub_ctrl = self.create_subscription(String, 'control_cmd', self.ctrl_cb, 10)
         self.sub_pid = self.create_subscription(Vector3, 'pid_gain', self.pid_cb, 10)
 
-        # Outputs (Passed to Calibration Node for PWM conversion)
+        # Outputs (Passed to Feedforward Node for PWM conversion)
         self.b_cmd_pub = self.create_publisher(Vector3, 'b_cmd_internal', 10)
         self.error_pub = self.create_publisher(Vector3, 'error', 10)
 
-        # 50Hz Control Loop
+        # 50Hz Control Loop (Matches MATLAB Ts = 0.02)
         self.last_time = self.get_clock().now()
         self.timer = self.create_timer(0.02, self.control_loop)
         
-        self.get_logger().info("Control Node Ready. Awaiting 'START' command.")
+        self.get_logger().info("Control Node Ready. Using B_cmd = targettty + u")
 
     def cmd_cb(self, msg):
         self.target = np.array([msg.x, msg.y, msg.z])
@@ -119,14 +119,14 @@ class ControlNode(Node):
         if dt <= 0: return
         dt = min(dt, 0.02)
 
-        # Calculate Error and total Commanded Field (Target + PID Effort)
+        # Calculate Error and total Commanded Field (B_cmd = target + u)
         error, b_cmd_out = self.controller.compute(self.target, self.current, dt)
 
         # Publish error for GUI monitoring
         err_msg = Vector3(x=float(error[0]), y=float(error[1]), z=float(error[2]))
         self.error_pub.publish(err_msg)
 
-        # Publish internal command to the Calibration Node
+        # Publish internal command to the Feedforward Node
         cmd_msg = Vector3(x=float(b_cmd_out[0]), y=float(b_cmd_out[1]), z=float(b_cmd_out[2]))
         self.b_cmd_pub.publish(cmd_msg)
 

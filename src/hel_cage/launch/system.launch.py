@@ -27,8 +27,8 @@ def generate_launch_description():
         ),
         Node(
             package='hel_cage',
-            executable='calibration_node',
-            name='calibration_node',
+            executable='feedfwd_node',
+            name='feedfwd_node',
             output='screen'
         ),
         Node(

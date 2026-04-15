@@ -6,146 +6,152 @@ from std_msgs.msg import String
 import numpy as np
 import csv
 import os
+import time
+from datetime import datetime
 
-class CalibrationNode(Node):
+class AutoSweepNode(Node):
     def __init__(self):
-        super().__init__('calibration_node')
+        super().__init__('auto_sweep_node')
 
-        # ===== WORKSPACE RESOLUTION =====
         self.ws_root = os.path.expanduser('~/helmholtz_minimal_ws')
-        
-        # ===== INDEPENDENT AXIS ARRAYS =====
-        # We store separate B (Magnetic Field) and PWM arrays for each axis.
-        # This is critical because sensor noise requires independent sorting for interpolation.
-        self.B_x = np.array([]); self.PWM_x = np.array([])
-        self.B_y = np.array([]); self.PWM_y = np.array([])
-        self.B_z = np.array([]); self.PWM_z = np.array([])
-
-        # ===== LOAD DEFAULT (If available) =====
-        # Try to load the most recent master calibration if it exists
         self.calib_dir = os.path.join(self.ws_root, 'calibration_files')
-        self._load_latest_master()
-
-        # ===== ROS INTERFACES =====
-        # Listens for target field commands (µT) from GUI
-        self.sub_cmd = self.create_subscription(Vector3, 'cmd_B', self.cmd_callback, 10)
+        os.makedirs(self.calib_dir, exist_ok=True)
         
-        # Listens for file updates from the AutoSweepNode
-        self.sub_ctrl = self.create_subscription(String, 'control_cmd', self.ctrl_cb, 10)
-        
-        # Publishes Feedforward base PWM to the Control Node
-        self.pub = self.create_publisher(Vector3, 'pwm_base', 10)
-        
-        self.get_logger().info("3-Axis Feedforward Calibration Node Ready.")
-
-    def _load_latest_master(self):
-        """Helper to find and load the newest master_calib file on startup."""
-        if not os.path.exists(self.calib_dir):
-            return
+        # ===== SWEEP CONFIGURATION =====
+        self.pwm_step = 10.0
+        self.pwm_max = 255.0
+        self.pwm_steps = list(np.arange(0, 260, self.pwm_step))
+        if self.pwm_steps[-1] < self.pwm_max:
+            self.pwm_steps.append(self.pwm_max)
             
-        files = [f for f in os.listdir(self.calib_dir) if f.startswith('master_calib_')]
-        if files:
-            # Sort by filename (which includes the Unix timestamp) to get the newest
-            latest_file = sorted(files)[-1]
-            path = os.path.join(self.calib_dir, latest_file)
-            self.load_csv(path)
-        else:
-            self.get_logger().warn("No master calibration files found. Awaiting Auto-Sweep.")
+        self.actual_pwm = 0.0        
+        self.max_pwm_slew_rate = 80.0 
+        self.timer_period = 0.05     
+        self.slew_per_tick = self.max_pwm_slew_rate * self.timer_period
 
-    def load_csv(self, csv_path):
-        self.get_logger().info(f"Loading Master Calibration: {csv_path}")
+        self.master_data = {} 
+        
+        # States: 'IDLE', 'RAMP_UP', 'SETTLE', 'MEASURE', 'RAMP_DOWN_AXIS', 'SAVE'
+        self.state = 'IDLE'
+        self.auto_apply = False
+        
+        self.axes = ['X', 'Y', 'Z']
+        self.current_axis_idx = 0
+        self.current_pwm_idx = 0
+        self.telemetry_buffer = []
 
-        pwm_raw, bx_raw, by_raw, bz_raw = [], [], [], []
+        self.ctrl_sub = self.create_subscription(String, 'control_cmd', self.ctrl_cb, 10)
+        self.tel_sub = self.create_subscription(Vector3, 'telemetry', self.tel_cb, 10)
+        self.pwm_pub = self.create_publisher(Vector3, 'pwm_cmd', 10)
+        self.ctrl_pub = self.create_publisher(String, 'control_cmd', 10)
 
-        # ===== READ 4-COLUMN CSV =====
-        try:
-            with open(csv_path, 'r') as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    try:
-                        # Format: [PWM, Bx, By, Bz]
-                        # We use abs() because the Helmholtz coil response is symmetric
-                        pwm_raw.append(abs(float(row[0])))
-                        bx_raw.append(abs(float(row[1])))
-                        by_raw.append(abs(float(row[2])))
-                        bz_raw.append(abs(float(row[3])))
-                    except ValueError:
-                        continue # Skip header or corrupted rows
-                        
-            # Convert to numpy arrays for fast math
-            pwm_arr = np.array(pwm_raw)
-            bx_arr = np.array(bx_raw)
-            by_arr = np.array(by_raw)
-            bz_arr = np.array(bz_raw)
-
-            # ===== INDEPENDENT SORTING =====
-            # np.interp strictly requires the "x" array (the B field) to be monotonically increasing.
-            # Because of sensor noise, we MUST sort each axis independently.
-            idx_x = np.argsort(bx_arr)
-            self.B_x = bx_arr[idx_x]
-            self.PWM_x = pwm_arr[idx_x]
-
-            idx_y = np.argsort(by_arr)
-            self.B_y = by_arr[idx_y]
-            self.PWM_y = pwm_arr[idx_y]
-
-            idx_z = np.argsort(bz_arr)
-            self.B_z = bz_arr[idx_z]
-            self.PWM_z = pwm_arr[idx_z]
-
-            self.get_logger().info("Successfully built 3-Axis Feedforward interpolation tables.")
-            
-        except FileNotFoundError:
-            self.get_logger().error(f"File not found: {csv_path}")
-        except Exception as e:
-            self.get_logger().error(f"Failed to load calibration: {e}")
+        self.timer = self.create_timer(self.timer_period, self.sweep_loop)
+        self.get_logger().info("Fixed Auto-Sweep Node: Axis-Transition Protection Active.")
 
     def ctrl_cb(self, msg):
-        """Listens for the automatic broadcast from the Auto-Sweep Node."""
         cmd = msg.data.strip()
-        if cmd.startswith("CALIB:"):
-            # Extract the file path sent by AutoSweepNode
-            path = cmd.split(":", 1)[1]
-            self.load_csv(path)
+        if cmd == "SWEEP:APPLY":
+            self.start_sweep(apply=True)
+        elif cmd == "SWEEP:SAVE_ONLY":
+            self.start_sweep(apply=False)
 
-    def interp_signed(self, target_B, B_array, PWM_array):
-        """Calculates the required PWM for a requested magnetic field."""
-        # Safety catch if tables aren't loaded yet
-        if len(B_array) == 0:
-            return 0.0
-            
-        # 1. Grab the direction (+ or -)
-        sign = np.sign(target_B)
-        
-        # 2. Interpolate the magnitude
-        # np.interp(target_x, recorded_x, recorded_y)
-        pwm_mag = np.interp(abs(target_B), B_array, PWM_array)
-        
-        # 3. Re-apply direction
-        return sign * pwm_mag
+    def start_sweep(self, apply):
+        if self.state != 'IDLE': return
+        self.auto_apply = apply
+        self.master_data = {float(pwm): [0.0, 0.0, 0.0] for pwm in self.pwm_steps}
+        self.current_axis_idx = 0
+        self.current_pwm_idx = 0
+        self.actual_pwm = 0.0
+        self.state = 'RAMP_UP'
 
-    def cmd_callback(self, msg):
-        """Fires every time the GUI requests a new magnetic field."""
-        out = Vector3()
-        
-        # Independently calculate feedforward for each axis
-        out.x = float(self.interp_signed(msg.x, self.B_x, self.PWM_x))
-        out.y = float(self.interp_signed(msg.y, self.B_y, self.PWM_y))
-        out.z = float(self.interp_signed(msg.z, self.B_z, self.PWM_z))
-        
-        # Publish the baseline guess to the PID Control Node
-        self.pub.publish(out)
+    def tel_cb(self, msg):
+        if self.state == 'MEASURE':
+            axis_name = self.axes[self.current_axis_idx].lower()
+            val = getattr(msg, axis_name)
+            self.telemetry_buffer.append(abs(val))
 
-def main(args=None):
-    rclpy.init(args=args)
-    node = CalibrationNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+    def sweep_loop(self):
+        if self.state == 'IDLE': return
+
+        now = time.time()
+        
+        # TARGET LOGIC
+        if self.state == 'RAMP_DOWN_AXIS':
+            target_pwm = 0.0
+        else:
+            target_pwm = float(self.pwm_steps[self.current_pwm_idx])
+
+        # SLEW LOGIC
+        diff = target_pwm - self.actual_pwm
+        step = np.clip(diff, -self.slew_per_tick, self.slew_per_tick)
+        self.actual_pwm += step
+
+        # PUBLISH to current axis
+        axis = self.axes[self.current_axis_idx]
+        cmd = Vector3()
+        setattr(cmd, axis.lower(), self.actual_pwm)
+        self.pwm_pub.publish(cmd)
+
+        # STATE TRANSITIONS
+        if self.state == 'RAMP_UP':
+            if abs(target_pwm - self.actual_pwm) < 0.1:
+                self.state_start_t = now
+                self.state = 'SETTLE'
+
+        elif self.state == 'SETTLE':
+            if now - self.state_start_t > 0.5:
+                self.telemetry_buffer = []
+                self.state_start_t = now
+                self.state = 'MEASURE'
+
+        elif self.state == 'MEASURE':
+            if now - self.state_start_t > 0.5:
+                avg_b = round(np.mean(self.telemetry_buffer)) if self.telemetry_buffer else 0.0
+                pwm_val = float(self.pwm_steps[self.current_pwm_idx])
+                self.master_data[pwm_val][self.current_axis_idx] = avg_b
+                
+                self.current_pwm_idx += 1
+                if self.current_pwm_idx >= len(self.pwm_steps):
+                    # Axis finished. Must ramp down BEFORE switching index.
+                    self.get_logger().info(f"{axis}-Axis finished. Spooling down...")
+                    self.state = 'RAMP_DOWN_AXIS'
+                else:
+                    self.state = 'RAMP_UP'
+
+        elif self.state == 'RAMP_DOWN_AXIS':
+            # Wait until current axis is at 0
+            if abs(self.actual_pwm) < 0.1:
+                self.current_pwm_idx = 0
+                self.current_axis_idx += 1
+                
+                if self.current_axis_idx >= len(self.axes):
+                    self.state = 'SAVE'
+                else:
+                    self.get_logger().info(f"Switching to {self.axes[self.current_axis_idx]}-Axis.")
+                    self.state = 'RAMP_UP'
+
+        elif self.state == 'SAVE':
+            self.save_calibration()
+            self.state = 'IDLE'
+
+    def save_calibration(self):
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"master_calib_{ts}.csv"
+        save_path = os.path.join(self.calib_dir, filename)
+        try:
+            with open(save_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                for pwm in self.pwm_steps:
+                    writer.writerow([float(pwm)] + self.master_data[float(pwm)])
+            self.get_logger().info(f"SUCCESS: Calibration saved to {save_path}")
+            if self.auto_apply:
+                self.ctrl_pub.publish(String(data=f"CALIB:{save_path}"))
+        except Exception as e:
+            self.get_logger().error(f"Save failed: {e}")
+
+def main():
+    rclpy.init()
+    rclpy.spin(AutoSweepNode())
 
 if __name__ == '__main__':
     main()

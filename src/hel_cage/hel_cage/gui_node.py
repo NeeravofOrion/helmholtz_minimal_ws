@@ -95,8 +95,8 @@ class GuiNode(Node):
         self.err_z.append(msg.z)
 
     def pwm_cb(self, msg):
-        if not self.control_active:
-            return
+       #if not self.control_active:
+        #    return
         self.pwm_x.append(msg.x)
         self.pwm_y.append(msg.y)
         self.pwm_z.append(msg.z)
@@ -511,7 +511,7 @@ class PlotWindow(QtWidgets.QMainWindow):
 
     def stop_system(self):
         self.node.control_active = False
-        self.extra_widget.setVisible(False)
+        
         self.node.send_control('STOP')
 
     def start_variable_field(self):
@@ -569,9 +569,10 @@ class PlotWindow(QtWidgets.QMainWindow):
             self.curve_ex.setData(self.node.err_x)
             self.curve_ey.setData(self.node.err_y)
             self.curve_ez.setData(self.node.err_z)
-            self.curve_px.setData(self.node.pwm_x)
-            self.curve_py.setData(self.node.pwm_y)
-            self.curve_pz.setData(self.node.pwm_z)
+        
+        self.curve_px.setData(self.node.pwm_x)
+        self.curve_py.setData(self.node.pwm_y)
+        self.curve_pz.setData(self.node.pwm_z)  
 
 
 # ================= MAIN =================
