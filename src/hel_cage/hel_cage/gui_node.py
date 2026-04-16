@@ -369,7 +369,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         self.plot_pwm.setYRange(-260, 260)
         self.plot_pwm.setLimits(yMin=-260, yMax=260)
 
-        self.extra_widget.setVisible(False)
+        self.extra_widget.setVisible(True)
         right_layout.addWidget(self.extra_widget, stretch=2)
 
         right_widget = QtWidgets.QWidget()
@@ -505,7 +505,7 @@ class PlotWindow(QtWidgets.QMainWindow):
             return
         self.node.control_active = True
         self.node.err_x.clear(); self.node.err_y.clear(); self.node.err_z.clear()
-        self.node.pwm_x.clear(); self.node.pwm_y.clear(); self.node.pwm_z.clear()
+        #self.node.pwm_x.clear(); self.node.pwm_y.clear(); self.node.pwm_z.clear()
         self.extra_widget.setVisible(True)
         self.node.send_control('START')
 

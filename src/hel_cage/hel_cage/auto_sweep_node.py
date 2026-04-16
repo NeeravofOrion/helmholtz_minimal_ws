@@ -13,43 +13,55 @@ class AutoSweepNode(Node):
     def __init__(self):
         super().__init__('auto_sweep_node')
 
-        # ===== WORKSPACE RESOLUTION =====
         self.ws_root = os.path.expanduser('~/helmholtz_minimal_ws')
         self.calib_dir = os.path.join(self.ws_root, 'calibration_files')
         os.makedirs(self.calib_dir, exist_ok=True)
         
-        # ===== SWEEP CONFIGURATION =====
+        # ===== SPLIT SEQUENCE CONFIGURATION =====
         self.pwm_step = 10.0
-        self.pwm_max = 255.0
-        self.pwm_steps = list(np.arange(0, 260, self.pwm_step))
-        if self.pwm_steps[-1] < self.pwm_max:
-            self.pwm_steps.append(self.pwm_max)
+        
+        # Positive sequence: [0.0, 10.0 ... 250.0, 255.0]
+        self.pwm_pos = list(np.arange(0.0, 255.0 + self.pwm_step, self.pwm_step))
+        if self.pwm_pos[-1] > 255.0: 
+            self.pwm_pos[-1] = 255.0
+            
+        # Negative sequence: [-10.0, -20.0 ... -250.0, -255.0]
+        self.pwm_neg = list(np.arange(-self.pwm_step, -255.0 - self.pwm_step, -self.pwm_step))
+        if self.pwm_neg[-1] < -255.0: 
+            self.pwm_neg[-1] = -255.0
             
         # --- THE HARDWARE BODYGUARD ---
         self.actual_pwm = 0.0        
-        self.max_pwm_slew_rate = 80.0 # PROTECTS THE CYTRON DRIVERS
+        self.max_pwm_slew_rate = 80.0 
         self.timer_period = 0.05     
         self.slew_per_tick = self.max_pwm_slew_rate * self.timer_period
 
-        self.master_data = {} 
+        # Data arrays, Corrected for strict memory alignment
+        combined_keys = self.pwm_neg + self.pwm_pos
+        self.all_keys = sorted([float(k) for k in combined_keys])
+        self.master_data = {}
         
-        # Updated States: 'IDLE', 'RAMP_UP', 'SETTLE', 'MEASURE', 'RAMP_DOWN_AXIS', 'SAVE'
+        # Ambient Baseline Memory
+        self.ambient_buffer = {'X': [], 'Y': [], 'Z': []}
+        self.ambient_baseline = {'X': 0.0, 'Y': 0.0, 'Z': 0.0}
+
+        # Execution Pointers
         self.state = 'IDLE'
         self.auto_apply = False
-        
         self.axes = ['X', 'Y', 'Z']
         self.current_axis_idx = 0
         self.current_pwm_idx = 0
+        self.current_phase = 'POS' 
+        self.post_spool_action = 'NONE'
         self.telemetry_buffer = []
 
-        # ===== ROS INTERFACES =====
         self.ctrl_sub = self.create_subscription(String, 'control_cmd', self.ctrl_cb, 10)
         self.tel_sub = self.create_subscription(Vector3, 'telemetry', self.tel_cb, 10)
         self.pwm_pub = self.create_publisher(Vector3, 'pwm_cmd', 10)
         self.ctrl_pub = self.create_publisher(String, 'control_cmd', 10)
 
         self.timer = self.create_timer(self.timer_period, self.sweep_loop)
-        self.get_logger().info("Axis-Safe Auto-Sweep Node Ready.")
+        self.get_logger().info("Relative Auto-Sweep Node Ready. Resolution: 10 PWM.")
 
     def ctrl_cb(self, msg):
         cmd = msg.data.strip()
@@ -60,25 +72,31 @@ class AutoSweepNode(Node):
 
     def start_sweep(self, apply):
         if self.state != 'IDLE': return
-        self.get_logger().info("--- STARTING 3-AXIS MASTER SWEEP ---")
+        self.get_logger().info("--- STARTING 3-AXIS RELATIVE SWEEP ---")
         self.auto_apply = apply
-        self.master_data = {float(pwm): [0.0, 0.0, 0.0] for pwm in self.pwm_steps}
+        self.master_data = {k: [0.0, 0.0, 0.0] for k in self.all_keys}
+        
         self.current_axis_idx = 0
         self.current_pwm_idx = 0
+        self.current_phase = 'POS'
         self.actual_pwm = 0.0
-        self.state = 'RAMP_UP'
+        
+        # Initiate baseline extraction protocol
+        self.state = 'AMBIENT_SETTLE'
 
     def tel_cb(self, msg):
-        if self.state == 'MEASURE':
-            axis_name = self.axes[self.current_axis_idx].lower()
-            val = getattr(msg, axis_name)
-            self.telemetry_buffer.append(abs(val))
+        if self.state == 'AMBIENT_MEASURE':
+            self.ambient_buffer['X'].append(msg.x)
+            self.ambient_buffer['Y'].append(msg.y)
+            self.ambient_buffer['Z'].append(msg.z)
+        elif self.state == 'MEASURE':
+            axis_name = self.axes[self.current_axis_idx]
+            val = getattr(msg, axis_name.lower())
+            self.telemetry_buffer.append(val)
 
     def sweep_loop(self):
-        # 1. Guard against IDLE
         if self.state == 'IDLE': return
 
-        # 2. Handle SAVE state immediately (The Fix for the crash)
         if self.state == 'SAVE':
             self.save_to_csv()
             self.state = 'IDLE'
@@ -86,25 +104,44 @@ class AutoSweepNode(Node):
 
         now = time.time()
         
-        # 3. Determine TARGET PWM
-        if self.state == 'RAMP_DOWN_AXIS':
+        # 1. DETERMINE TARGET PWM
+        if self.state in ['SPOOL_TO_ZERO', 'AMBIENT_SETTLE', 'AMBIENT_MEASURE']:
             target_pwm = 0.0
+        elif self.current_phase == 'POS':
+            target_pwm = float(self.pwm_pos[self.current_pwm_idx])
         else:
-            target_pwm = float(self.pwm_steps[self.current_pwm_idx])
+            target_pwm = float(self.pwm_neg[self.current_pwm_idx])
 
-        # 4. SLEW LOGIC
+        # 2. SLEW LOGIC
         diff = target_pwm - self.actual_pwm
         step = np.clip(diff, -self.slew_per_tick, self.slew_per_tick)
         self.actual_pwm += step
 
-        # 5. PUBLISH to current axis (Now safe from IndexError)
+        # 3. PUBLISH
         axis = self.axes[self.current_axis_idx]
         cmd = Vector3()
-        setattr(cmd, axis.lower(), self.actual_pwm)
+        # Always output to all axes to guarantee zeroing
+        cmd.x = self.actual_pwm if axis == 'X' else 0.0
+        cmd.y = self.actual_pwm if axis == 'Y' else 0.0
+        cmd.z = self.actual_pwm if axis == 'Z' else 0.0
         self.pwm_pub.publish(cmd)
 
-        # 6. STATE TRANSITIONS
-        if self.state == 'RAMP_UP':
+        # 4. STATE TRANSITIONS
+        if self.state == 'AMBIENT_SETTLE':
+            if abs(self.actual_pwm) < 0.1:
+                self.ambient_buffer = {'X': [], 'Y': [], 'Z': []}
+                self.state_start_t = now
+                self.state = 'AMBIENT_MEASURE'
+                self.get_logger().info("Measuring ambient baseline. Standby 3 seconds.")
+
+        elif self.state == 'AMBIENT_MEASURE':
+            if now - self.state_start_t > 3.0:
+                for ax in ['X', 'Y', 'Z']:
+                    self.ambient_baseline[ax] = np.mean(self.ambient_buffer[ax]) if self.ambient_buffer[ax] else 0.0
+                self.get_logger().info(f"Baseline -> X: {self.ambient_baseline['X']:.2f}, Y: {self.ambient_baseline['Y']:.2f}, Z: {self.ambient_baseline['Z']:.2f}")
+                self.state = 'SLEW_TO_STEP'
+
+        elif self.state == 'SLEW_TO_STEP':
             if abs(target_pwm - self.actual_pwm) < 0.1:
                 self.state_start_t = now
                 self.state = 'SETTLE'
@@ -117,41 +154,57 @@ class AutoSweepNode(Node):
 
         elif self.state == 'MEASURE':
             if now - self.state_start_t > 0.5:
-                avg_b = round(np.mean(self.telemetry_buffer)) if self.telemetry_buffer else 0.0
-                pwm_val = float(self.pwm_steps[self.current_pwm_idx])
-                self.master_data[pwm_val][self.current_axis_idx] = avg_b
-                self.get_logger().info(f"{self.axes[self.current_axis_idx]}-Axis | {pwm_val} PWM -> {avg_b:.2f} µT")
+                raw_mean = np.mean(self.telemetry_buffer) if self.telemetry_buffer else 0.0
+                # Apply the ambient correction subtraction
+                relative_b = round(raw_mean - self.ambient_baseline[axis], 2)
+                pwm_val = target_pwm
+                
+                self.master_data[pwm_val][self.current_axis_idx] = relative_b
+                self.get_logger().info(f"{axis}-Axis | {pwm_val} PWM -> {relative_b} µT")
+                
                 self.current_pwm_idx += 1
-                if self.current_pwm_idx >= len(self.pwm_steps):
-                    self.get_logger().info(f"{axis}-Axis finished. Spooling down...")
-                    self.state = 'RAMP_DOWN_AXIS'
+                
+                # Check for array exhaustion
+                active_array = self.pwm_pos if self.current_phase == 'POS' else self.pwm_neg
+                if self.current_pwm_idx >= len(active_array):
+                    if self.current_phase == 'POS':
+                        self.get_logger().info(f"{axis}-Axis POS sweep complete. Spooling to 0...")
+                        self.post_spool_action = 'START_NEG'
+                        self.state = 'SPOOL_TO_ZERO'
+                    else:
+                        self.get_logger().info(f"{axis}-Axis NEG sweep complete. Spooling to 0...")
+                        self.post_spool_action = 'NEXT_AXIS'
+                        self.state = 'SPOOL_TO_ZERO'
                 else:
-                    self.state = 'RAMP_UP'
+                    self.state = 'SLEW_TO_STEP'
 
-        elif self.state == 'RAMP_DOWN_AXIS':
-            # Wait until current axis is at 0
+        elif self.state == 'SPOOL_TO_ZERO':
             if abs(self.actual_pwm) < 0.1:
-                # CHECK: Are there more axes left?
-                if self.current_axis_idx >= len(self.axes) - 1:
-                    # No more axes. Go to SAVE state.
-                    self.state = 'SAVE'
-                else:
-                    # Reset PWM index and move to next axis
+                if self.post_spool_action == 'START_NEG':
+                    self.current_phase = 'NEG'
                     self.current_pwm_idx = 0
+                    self.state = 'SLEW_TO_STEP'
+                elif self.post_spool_action == 'NEXT_AXIS':
                     self.current_axis_idx += 1
-                    self.get_logger().info(f"Switching to {self.axes[self.current_axis_idx]}-Axis.")
-                    self.state = 'RAMP_UP'
+                    if self.current_axis_idx >= len(self.axes):
+                        self.state = 'SAVE'
+                    else:
+                        self.current_phase = 'POS'
+                        self.current_pwm_idx = 0
+                        self.get_logger().info(f"Switching to {self.axes[self.current_axis_idx]}-Axis.")
+                        self.state = 'SLEW_TO_STEP'
 
     def save_to_csv(self):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"master_calib_{ts}.csv"
+        filename = f"master_calib_relative_{ts}.csv"
         save_path = os.path.join(self.calib_dir, filename)
         try:
             with open(save_path, 'w', newline='') as f:
                 writer = csv.writer(f)
-                for pwm in self.pwm_steps:
-                    writer.writerow([float(pwm)] + self.master_data[float(pwm)])
-            self.get_logger().info(f"SUCCESS: Calibration saved to {save_path}")
+                # Iterate over sorted keys to ensure sequential data output (-255 to 255)
+                for pwm in self.all_keys:
+                    writer.writerow([pwm] + self.master_data[pwm])
+            self.get_logger().info(f"SUCCESS: Relative Calibration saved to {save_path}")
             if self.auto_apply:
                 self.ctrl_pub.publish(String(data=f"CALIB:{save_path}"))
         except Exception as e:
