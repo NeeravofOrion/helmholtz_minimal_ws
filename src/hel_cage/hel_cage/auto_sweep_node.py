@@ -69,6 +69,10 @@ class AutoSweepNode(Node):
             self.start_sweep(apply=True)
         elif cmd == "SWEEP:SAVE_ONLY":
             self.start_sweep(apply=False)
+        elif cmd == "ABORT":
+            self.get_logger().warn("Network ABORT received. Engaging safe spool down.")
+            self.post_spool_action = 'ABORT'
+            self.state = 'SPOOL_TO_ZERO'
 
     def start_sweep(self, apply):
         if self.state != 'IDLE': return
@@ -180,7 +184,10 @@ class AutoSweepNode(Node):
 
         elif self.state == 'SPOOL_TO_ZERO':
             if abs(self.actual_pwm) < 0.1:
-                if self.post_spool_action == 'START_NEG':
+                if self.post_spool_action == 'ABORT':
+                    self.state = 'IDLE'
+                    self.get_logger().warn("Hardware secured. Abort complete.")
+                elif self.post_spool_action == 'START_NEG':
                     self.current_phase = 'NEG'
                     self.current_pwm_idx = 0
                     self.state = 'SLEW_TO_STEP'
@@ -193,7 +200,6 @@ class AutoSweepNode(Node):
                         self.current_pwm_idx = 0
                         self.get_logger().info(f"Switching to {self.axes[self.current_axis_idx]}-Axis.")
                         self.state = 'SLEW_TO_STEP'
-
     def save_to_csv(self):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"master_calib_relative_{ts}.csv"

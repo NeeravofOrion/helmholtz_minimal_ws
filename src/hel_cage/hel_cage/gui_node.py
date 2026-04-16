@@ -389,13 +389,22 @@ class PlotWindow(QtWidgets.QMainWindow):
     
     def closeEvent(self, event):
         """This triggers automatically when you close the GUI window."""
+        print("GUI Terminated. Broadcasting ABORT sequence.")
+        
+        # 1. Issue the command to the AutoSweepNode
+        self.node.send_control('ABORT')
+        
+        # 2. Prevent OS socket destruction before packet transmission
+        # Stall the main thread for 200 milliseconds while flushing the ROS queue
+        t_end = time.time() + 0.2
+        while time.time() < t_end:
+            rclpy.spin_once(self.node, timeout_sec=0.01)
+
+        # 3. Proceed with analytical script execution
         if hasattr(self, 'auto_launch_cb') and self.auto_launch_cb.isChecked():
             print("Auto-launching Data Analysis Tool...")
             try:
-                # FIX: Point directly to your result_logs folder instead of the ROS install folder
                 analyzer_path = os.path.expanduser('~/helmholtz_minimal_ws/result_logs/anie.py')
-                
-                # Double check that the file actually exists before trying to run it
                 if not os.path.exists(analyzer_path):
                     print(f"Error: Could not find anie.py at {analyzer_path}")
                 else:
@@ -404,6 +413,8 @@ class PlotWindow(QtWidgets.QMainWindow):
                 print(f"Failed to launch analysis tool: {e}")
         else:
             print("Auto-launch disabled. Shutting down cleanly.")
+            
+        event.accept()
             
         event.accept()
     # ===== FILE PICKERS =====
