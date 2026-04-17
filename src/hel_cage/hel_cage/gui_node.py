@@ -239,6 +239,10 @@ class PlotWindow(QtWidgets.QMainWindow):
         # 2. ADD THE NEW INITIALIZATION BUTTONS HERE
         self.btn_init_apply = QtWidgets.QPushButton("Run Initialization & Apply")
         self.btn_init_save = QtWidgets.QPushButton("Run Initialization (Save Only)")
+        self.btn_abort_sweep = QtWidgets.QPushButton("Abort Auto-Sweep & Analyze")
+        self.btn_abort_sweep.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold;")
+        self.btn_abort_sweep.clicked.connect(self.abort_autosweep)
+        
         
         # Style them slightly different so they stand out
         self.btn_init_apply.setStyleSheet("background-color: #3498db; color: white;")
@@ -252,7 +256,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         calib_inner.addWidget(self.calib_load_btn)
         calib_inner.addWidget(self.btn_init_apply) # <--- Added to UI
         calib_inner.addWidget(self.btn_init_save)  # <--- Added to UI
-        
+        calib_inner.addWidget(self.btn_abort_sweep)
         calib_group.setLayout(calib_inner)
         left_layout.addWidget(calib_group)
 
@@ -392,14 +396,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         print("GUI Terminated. Broadcasting ABORT sequence.")
         
         # 1. Issue the command to the AutoSweepNode
-        self.node.send_control('ABORT')
         
-        # 2. Prevent OS socket destruction before packet transmission
-        # Stall the main thread for 200 milliseconds while flushing the ROS queue
-        t_end = time.time() + 0.2
-        while time.time() < t_end:
-            rclpy.spin_once(self.node, timeout_sec=0.01)
-
         # 3. Proceed with analytical script execution
         if hasattr(self, 'auto_launch_cb') and self.auto_launch_cb.isChecked():
             print("Auto-launching Data Analysis Tool...")
@@ -414,7 +411,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         else:
             print("Auto-launch disabled. Shutting down cleanly.")
             
-        event.accept()
+        
             
         event.accept()
     # ===== FILE PICKERS =====
@@ -524,7 +521,32 @@ class PlotWindow(QtWidgets.QMainWindow):
         self.node.control_active = False
         
         self.node.send_control('STOP')
+    def abort_autosweep(self):
+        """Manually triggers the spool down and launches the analyzer."""
+        print("Manual Abort Triggered. Broadcasting ABORT sequence.")
+        
+        # 1. Issue the command to the AutoSweepNode
+        self.node.send_control('ABORT')
+        
+        # 2. Prevent UI thread continuation before packet transmission
+        t_end = time.time() + 0.2
+        while time.time() < t_end:
+            rclpy.spin_once(self.node, timeout_sec=0.01)
 
+        # 3. Proceed with analytical script execution
+        if hasattr(self, 'auto_launch_cb') and self.auto_launch_cb.isChecked():
+            print("Auto-launching Data Analysis Tool...")
+            try:
+                analyzer_path = os.path.expanduser('~/helmholtz_minimal_ws/result_logs/anie.py')
+                if not os.path.exists(analyzer_path):
+                    print(f"Error: Could not find anie.py at {analyzer_path}")
+                else:
+                    import subprocess, sys
+                    subprocess.Popen([sys.executable, analyzer_path])
+            except Exception as e:
+                print(f"Failed to launch analysis tool: {e}")
+        else:
+            print("Auto-launch disabled.")
     def start_variable_field(self):
         path = self.csv_path.text().strip()
         if not path:

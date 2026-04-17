@@ -36,16 +36,10 @@ class AutoSweepNode(Node):
         self.timer_period = 0.05     
         self.slew_per_tick = self.max_pwm_slew_rate * self.timer_period
 
-        # ===== THE INDEPENDENT WATCHDOG =====
-        self.last_tel_time = time.time()
-        self.TIMEOUT_LIMIT = 1.0
-        self.watchdog_tripped = False
-
         # Data arrays, Corrected for strict memory alignment
         combined_keys = self.pwm_neg + self.pwm_pos
         self.all_keys = sorted([float(k) for k in combined_keys])
         self.master_data = {}
-        self.current_save_path = "" # Track the active file
         
         # Ambient Baseline Memory
         self.ambient_buffer = {'X': [], 'Y': [], 'Z': []}
@@ -67,7 +61,7 @@ class AutoSweepNode(Node):
         self.ctrl_pub = self.create_publisher(String, 'control_cmd', 10)
 
         self.timer = self.create_timer(self.timer_period, self.sweep_loop)
-        self.get_logger().info("Relative Auto-Sweep Node Ready. Sensor Watchdog ACTIVE. Resolution: 1 PWM.")
+        self.get_logger().info("Relative Auto-Sweep Node Ready. Resolution: 10 PWM.")
 
     def ctrl_cb(self, msg):
         cmd = msg.data.strip()
@@ -82,20 +76,9 @@ class AutoSweepNode(Node):
 
     def start_sweep(self, apply):
         if self.state != 'IDLE': return
-        
-        # Do not allow sweep to start if sensor is already dead
-        if time.time() - self.last_tel_time > self.TIMEOUT_LIMIT:
-            self.get_logger().error("START REJECTED. Sensor connection is absent.")
-            return
-
         self.get_logger().info("--- STARTING 3-AXIS RELATIVE SWEEP ---")
         self.auto_apply = apply
         self.master_data = {k: [0.0, 0.0, 0.0] for k in self.all_keys}
-        
-        # Immediate File Generation
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_save_path = os.path.join(self.calib_dir, f"master_calib_relative_{ts}.csv")
-        self.dump_to_disk()
         
         self.current_axis_idx = 0
         self.current_pwm_idx = 0
@@ -106,12 +89,6 @@ class AutoSweepNode(Node):
         self.state = 'AMBIENT_SETTLE'
 
     def tel_cb(self, msg):
-        # Update heartbeat and reset latch if sensor returns
-        self.last_tel_time = time.time()
-        if self.watchdog_tripped:
-            self.get_logger().info("SENSOR SIGNAL RESTORED.")
-            self.watchdog_tripped = False
-
         if self.state == 'AMBIENT_MEASURE':
             self.ambient_buffer['X'].append(msg.x)
             self.ambient_buffer['Y'].append(msg.y)
@@ -125,23 +102,11 @@ class AutoSweepNode(Node):
         if self.state == 'IDLE': return
 
         if self.state == 'SAVE':
-            self.get_logger().info(f"Sweep finalization complete. Final file at {self.current_save_path}")
-            if self.auto_apply:
-                self.ctrl_pub.publish(String(data=f"CALIB:{self.current_save_path}"))
+            self.save_to_csv()
             self.state = 'IDLE'
             return
 
         now = time.time()
-        
-        # === WATCHDOG TRIGGER ===
-        if now - self.last_tel_time > self.TIMEOUT_LIMIT:
-            if not self.watchdog_tripped:
-                self.get_logger().error("SENSOR SIGNAL LOST. Intercepting Sweep. Engaging safe spool down. Data preserved.")
-                self.watchdog_tripped = True
-                
-                # Hijack the state machine to execute physical descent
-                self.post_spool_action = 'ABORT'
-                self.state = 'SPOOL_TO_ZERO'
         
         # 1. DETERMINE TARGET PWM
         if self.state in ['SPOOL_TO_ZERO', 'AMBIENT_SETTLE', 'AMBIENT_MEASURE']:
@@ -201,9 +166,6 @@ class AutoSweepNode(Node):
                 self.master_data[pwm_val][self.current_axis_idx] = relative_b
                 self.get_logger().info(f"{axis}-Axis | {pwm_val} PWM -> {relative_b} µT")
                 
-                # EXECUTE CONTINUOUS LIVE WRITE
-                self.dump_to_disk()
-                
                 self.current_pwm_idx += 1
                 
                 # Check for array exhaustion
@@ -238,47 +200,25 @@ class AutoSweepNode(Node):
                         self.current_pwm_idx = 0
                         self.get_logger().info(f"Switching to {self.axes[self.current_axis_idx]}-Axis.")
                         self.state = 'SLEW_TO_STEP'
-                        
-    def dump_to_disk(self):
-        """Silently overwrites the active CSV with the latest matrix state."""
-        if not self.current_save_path: return
+    def save_to_csv(self):
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"master_calib_relative_{ts}.csv"
+        save_path = os.path.join(self.calib_dir, filename)
         try:
-            with open(self.current_save_path, 'w', newline='') as f:
+            with open(save_path, 'w', newline='') as f:
                 writer = csv.writer(f)
+                # Iterate over sorted keys to ensure sequential data output (-255 to 255)
                 for pwm in self.all_keys:
                     writer.writerow([pwm] + self.master_data[pwm])
+            self.get_logger().info(f"SUCCESS: Relative Calibration saved to {save_path}")
+            if self.auto_apply:
+                self.ctrl_pub.publish(String(data=f"CALIB:{save_path}"))
         except Exception as e:
-            self.get_logger().error(f"Live disk write failed: {e}")
+            self.get_logger().error(f"Save failed: {e}")
 
 def main():
     rclpy.init()
-    node = AutoSweepNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        node.get_logger().warn("CTRL+C DETECTED. Executing synchronous safe spool down.")
-        
-        while abs(node.actual_pwm) > 0.1:
-            diff = 0.0 - node.actual_pwm
-            step = np.clip(diff, -node.slew_per_tick, node.slew_per_tick)
-            node.actual_pwm += step
-            
-            axis = node.axes[node.current_axis_idx]
-            cmd = Vector3()
-            cmd.x = node.actual_pwm if axis == 'X' else 0.0
-            cmd.y = node.actual_pwm if axis == 'Y' else 0.0
-            cmd.z = node.actual_pwm if axis == 'Z' else 0.0
-            node.pwm_pub.publish(cmd)
-            
-            time.sleep(node.timer_period)
-            
-        node.get_logger().info("Hardware secured. Executing final disk flush.")
-        node.dump_to_disk()
-        node.state = 'IDLE'
-        
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+    rclpy.spin(AutoSweepNode())
 
 if __name__ == '__main__':
     main()
