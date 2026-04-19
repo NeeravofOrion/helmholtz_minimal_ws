@@ -91,9 +91,9 @@ class RVizFullFieldPublisher(Node):
         end = Point(x=origin_x + float(vec_x), y=origin_y + float(vec_y), z=origin_z + float(vec_z))
         marker.points = [start, end]
         
-        marker.scale.x = thickness      # Shaft diameter
-        marker.scale.y = thickness * 2  # Head diameter
-        marker.scale.z = thickness * 2  # Head length
+        marker.scale.x = thickness * 2  # Shaft diameter
+        marker.scale.y = thickness * 4  # Head diameter
+        marker.scale.z = thickness * 4  # Head length
         
         marker.color = ColorRGBA(r=float(r), g=float(g), b=float(b), a=1.0)
         return marker

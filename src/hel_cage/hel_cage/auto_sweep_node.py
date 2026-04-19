@@ -186,13 +186,13 @@ class AutoSweepNode(Node):
                 self.state = 'SETTLE'
 
         elif self.state == 'SETTLE':
-            if now - self.state_start_t > 0.5:
+            if now - self.state_start_t > 2.0: #change for time peroid
                 self.telemetry_buffer = []
                 self.state_start_t = now
                 self.state = 'MEASURE'
 
         elif self.state == 'MEASURE':
-            if now - self.state_start_t > 0.5:
+            if now - self.state_start_t > 2.0: #change for time period
                 raw_mean = np.mean(self.telemetry_buffer) if self.telemetry_buffer else 0.0
                 # Apply the ambient correction subtraction
                 relative_b = round(raw_mean - self.ambient_baseline[axis], 2)

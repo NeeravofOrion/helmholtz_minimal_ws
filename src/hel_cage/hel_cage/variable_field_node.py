@@ -27,7 +27,7 @@ class VariableFieldNode(Node):
         self.start_time = self.get_clock().now()
 
         # ===== LOOP =====
-        self.dt = 0.02
+        self.dt = 0.1
         self.create_timer(self.dt, self.loop)
 
     # ================= LOAD CSV =================
